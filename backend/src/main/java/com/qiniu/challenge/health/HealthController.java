@@ -16,9 +16,8 @@ public class HealthController {
     private final ZoneId timezone;
 
     public HealthController(
-            @Value("${app.version:0.1.0}") String version,
-            @Value("${app.timezone:Asia/Shanghai}") String timezone
-    ) {
+            @Value("${app.version}") String version,
+            @Value("${app.timezone}") String timezone) {
         this.version = version;
         this.timezone = ZoneId.of(timezone);
     }
@@ -28,7 +27,6 @@ public class HealthController {
         return ApiResponse.success(new HealthStatusResponse(
                 "UP",
                 version,
-                OffsetDateTime.now(timezone).toString()
-        ));
+                OffsetDateTime.now(timezone).toString()));
     }
 }
