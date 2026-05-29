@@ -1,0 +1,42 @@
+CREATE TABLE event_reminders (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  event_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  offset_minutes INT NULL,
+  trigger_at DATETIME(3) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  snoozed_from_id BIGINT NULL,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  cancelled_at DATETIME(3) NULL,
+  INDEX idx_reminders_trigger (status, trigger_at),
+  INDEX idx_reminders_user_status (user_id, status),
+  INDEX idx_reminders_event (event_id),
+  CONSTRAINT fk_reminders_event FOREIGN KEY (event_id) REFERENCES calendar_events (id),
+  CONSTRAINT fk_reminders_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_reminders_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_reminders_created_by FOREIGN KEY (created_by) REFERENCES users (id),
+  CONSTRAINT fk_reminders_snoozed_from FOREIGN KEY (snoozed_from_id) REFERENCES event_reminders (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE notifications (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  reminder_id BIGINT NULL,
+  type VARCHAR(64) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  content TEXT NULL,
+  payload JSON NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'unread',
+  pushed_at DATETIME(3) NULL,
+  read_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_notifications_user_status (user_id, status, created_at),
+  INDEX idx_notifications_reminder (reminder_id),
+  CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_notifications_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_notifications_reminder FOREIGN KEY (reminder_id) REFERENCES event_reminders (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
