@@ -1,4 +1,5 @@
 import { request } from './http'
+import type { RequestOptions } from './types'
 
 export type HealthStatus = {
   status: string
@@ -6,7 +7,6 @@ export type HealthStatus = {
   time: string
 }
 
-export function getHealthStatus() {
-  return request<HealthStatus>('/health')
+export function getHealthStatus(options: Pick<RequestOptions, 'showErrorMessage'> = {}) {
+  return request<HealthStatus>('/health', options)
 }
-
