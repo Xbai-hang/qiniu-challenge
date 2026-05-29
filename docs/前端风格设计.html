@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Native Calendar OS</title>
+
+  <!-- Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+
+      --bg:
+      linear-gradient(
+        180deg,
+        #f8faff 0%,
+        #f4f6fb 100%
+      );
+
+      --card-bg:
+      rgba(255,255,255,0.72);
+
+      --border:
+      rgba(255,255,255,0.6);
+
+      --primary:
+      #6E7CFB;
+
+      --primary-light:
+      #EEF2FF;
+
+      --purple:
+      #8B5CF6;
+
+      --success:
+      #34D399;
+
+      --danger:
+      #FF6B6B;
+
+      --text:
+      #111827;
+
+      --text-soft:
+      #6B7280;
+
+      --shadow:
+      0 8px 32px rgba(15,23,42,0.06);
+
+      --shadow-hover:
+      0 18px 48px rgba(15,23,42,0.12);
+
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+
+      --transition:
+      all .35s cubic-bezier(
+        0.4,
+        0,
+        0.2,
+        1
+      );
+    }
+
+    body {
+
+      font-family:
+      "Inter",
+      "PingFang SC",
+      sans-serif;
+
+      background: var(--bg);
+
+      color: var(--text);
+
+      height: 100vh;
+
+      overflow: hidden;
+    }
+
+    .app {
+
+      display: grid;
+
+      grid-template-columns:
+      340px
+      1fr
+      320px;
+
+      gap: 24px;
+
+      padding: 24px;
+
+      height: 100vh;
+    }
+
+    .glass {
+
+      background: var(--card-bg);
+
+      border: 1px solid var(--border);
+
+      backdrop-filter: blur(24px);
+
+      box-shadow: var(--shadow);
+
+      border-radius: var(--radius-xl);
+    }
+
+    /* LEFT */
+
+    .left-panel {
+
+      padding: 24px;
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 24px;
+    }
+
+    .logo {
+
+      display: flex;
+
+      align-items: center;
+
+      justify-content: space-between;
+    }
+
+    .logo h2 {
+
+      font-size: 22px;
+
+      font-weight: 700;
+    }
+
+    .voice-orb-wrapper {
+
+      display: flex;
+
+      justify-content: center;
+
+      margin-top: 8px;
+    }
+
+    .voice-orb {
+
+      width: 100px;
+      height: 100px;
+
+      border-radius: 50%;
+
+      background:
+      radial-gradient(
+        circle,
+        #8B5CF6 0%,
+        #6E7CFB 100%
+      );
+
+      box-shadow:
+      0 0 40px rgba(139,92,246,.4);
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      color: white;
+
+      font-size: 34px;
+
+      animation:
+      pulse 2.8s infinite;
+    }
+
+    @keyframes pulse {
+
+      0% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.06);
+      }
+
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    .transcript {
+
+      padding: 18px;
+
+      border-radius: 18px;
+
+      background:
+      rgba(255,255,255,.6);
+
+      line-height: 1.8;
+
+      color: var(--text-soft);
+    }
+
+    .timeline {
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 14px;
+    }
+
+    .timeline-item {
+
+      display: flex;
+
+      align-items: center;
+
+      gap: 12px;
+
+      font-size: 14px;
+
+      color: var(--text-soft);
+    }
+
+    .status {
+
+      width: 10px;
+      height: 10px;
+
+      border-radius: 50%;
+    }
+
+    .success {
+      background: var(--success);
+    }
+
+    .running {
+      background: var(--primary);
+    }
+
+    .tool-call {
+
+      display: inline-flex;
+
+      align-items: center;
+
+      gap: 8px;
+
+      padding: 8px 12px;
+
+      border-radius: 999px;
+
+      background:
+      rgba(15,23,42,0.04);
+
+      font-size: 13px;
+
+      margin-top: 8px;
+
+      font-family: monospace;
+    }
+
+    .pending-card {
+
+      padding: 20px;
+
+      border-radius: 20px;
+
+      background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #f8faff
+      );
+
+      border:
+      1px solid rgba(110,124,251,.2);
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 16px;
+    }
+
+    .pending-card h4 {
+
+      font-size: 16px;
+    }
+
+    .pending-actions {
+
+      display: flex;
+
+      gap: 12px;
+    }
+
+    .btn {
+
+      border: none;
+
+      border-radius: 14px;
+
+      padding:
+      12px 18px;
+
+      cursor: pointer;
+
+      transition: var(--transition);
+
+      font-weight: 600;
+    }
+
+    .btn-primary {
+
+      background: var(--primary);
+
+      color: white;
+    }
+
+    .btn-secondary {
+
+      background:
+      rgba(15,23,42,.05);
+
+      color: var(--text);
+    }
+
+    .btn:hover {
+
+      transform: translateY(-2px);
+    }
+
+    /* CENTER */
+
+    .workspace {
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 24px;
+    }
+
+    .topbar {
+
+      height: 72px;
+
+      padding: 0 24px;
+
+      display: flex;
+
+      align-items: center;
+
+      justify-content: space-between;
+    }
+
+    .command {
+
+      width: 420px;
+
+      height: 48px;
+
+      border-radius: 16px;
+
+      border: none;
+
+      background:
+      rgba(255,255,255,.8);
+
+      padding: 0 18px;
+
+      outline: none;
+    }
+
+    .calendar {
+
+      flex: 1;
+
+      padding: 24px;
+
+      display: grid;
+
+      grid-template-columns: repeat(7, 1fr);
+
+      grid-template-rows: repeat(5, 1fr);
+
+      gap: 14px;
+    }
+
+    .day {
+
+      border-radius: 18px;
+
+      background:
+      rgba(255,255,255,.45);
+
+      padding: 12px;
+
+      position: relative;
+
+      transition: var(--transition);
+    }
+
+    .day:hover {
+
+      transform: translateY(-2px);
+
+      box-shadow: var(--shadow-hover);
+    }
+
+    .day-number {
+
+      font-size: 13px;
+
+      color: var(--text-soft);
+
+      margin-bottom: 10px;
+    }
+
+    .event {
+
+      padding: 10px;
+
+      border-radius: 14px;
+
+      font-size: 13px;
+
+      line-height: 1.5;
+
+      background:
+      linear-gradient(
+        135deg,
+        #EEF2FF,
+        #E0E7FF
+      );
+
+      color: #4F46E5;
+
+      transition: var(--transition);
+    }
+
+    .event:hover {
+
+      transform: scale(1.02);
+
+      box-shadow:
+      0 12px 24px rgba(99,102,241,.18);
+    }
+
+    .event-danger {
+
+      background:
+      rgba(255,107,107,.1);
+
+      border:
+      1px solid rgba(255,107,107,.2);
+
+      color: var(--danger);
+    }
+
+    .gantt {
+
+      height: 220px;
+
+      padding: 24px;
+
+      position: relative;
+    }
+
+    .gantt-bar {
+
+      position: absolute;
+
+      height: 32px;
+
+      border-radius: 999px;
+
+      background:
+      linear-gradient(
+        90deg,
+        #C7D2FE,
+        #A5B4FC
+      );
+    }
+
+    /* RIGHT */
+
+    .right-panel {
+
+      padding: 24px;
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 20px;
+    }
+
+    .info-card {
+
+      padding: 20px;
+
+      display: flex;
+
+      flex-direction: column;
+
+      gap: 14px;
+    }
+
+    .info-card h3 {
+
+      font-size: 16px;
+    }
+
+    .focus-item {
+
+      padding: 16px;
+
+      border-radius: 18px;
+
+      background:
+      rgba(255,255,255,.5);
+    }
+
+    .focus-item p {
+
+      color: var(--text-soft);
+
+      margin-top: 6px;
+
+      font-size: 14px;
+    }
+
+    .insight {
+
+      padding: 16px;
+
+      border-radius: 16px;
+
+      background:
+      linear-gradient(
+        135deg,
+        rgba(110,124,251,.08),
+        rgba(139,92,246,.08)
+      );
+
+      line-height: 1.7;
+
+      color: var(--text-soft);
+    }
+
+  </style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <!-- LEFT -->
+
+  <aside class="left-panel glass">
+
+    <div class="logo">
+      <h2>AI 助手</h2>
+      <span>✦</span>
+    </div>
+
+    <div class="voice-orb-wrapper">
+      <div class="voice-orb">
+        🎤
+      </div>
+    </div>
+
+    <div class="transcript">
+      帮我安排下周三产品评审会，
+      参与人包括设计团队与后端团队，
+      避开冲突时间。
+    </div>
+
+    <div class="timeline">
+
+      <div class="timeline-item">
+        <div class="status success"></div>
+        已完成语音转写
+      </div>
+
+      <div class="timeline-item">
+        <div class="status success"></div>
+        正在分析参与人
+      </div>
+
+      <div class="timeline-item">
+        <div class="status running"></div>
+        查询空闲时间
+      </div>
+
+    </div>
+
+    <div class="tool-call">
+      Calendar.searchFreeTime()
+    </div>
+
+    <div class="tool-call">
+      MeetingRoom.find()
+    </div>
+
+    <div class="pending-card">
+
+      <h4>产品评审会</h4>
+
+      <p>
+        周三 14:00 - 15:30
+      </p>
+
+      <p style="color: var(--text-soft)">
+        参与人：6 人
+      </p>
+
+      <div class="pending-actions">
+
+        <button class="btn btn-primary">
+          确认创建
+        </button>
+
+        <button class="btn btn-secondary">
+          修改
+        </button>
+
+      </div>
+
+    </div>
+
+  </aside>
+
+  <!-- CENTER -->
+
+  <main class="workspace">
+
+    <div class="topbar glass">
+
+      <h2>2025年5月</h2>
+
+      <input
+      class="command"
+      placeholder="Ask AI to schedule..." />
+
+    </div>
+
+    <section class="calendar glass">
+
+      <div class="day">
+        <div class="day-number">12</div>
+
+        <div class="event">
+          产品评审会<br />
+          14:00 - 15:30
+        </div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">13</div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">14</div>
+
+        <div class="event event-danger">
+          时间冲突
+        </div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">15</div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">16</div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">17</div>
+      </div>
+
+      <div class="day">
+        <div class="day-number">18</div>
+      </div>
+
+    </section>
+
+    <section class="gantt glass">
+
+      <div
+      class="gantt-bar"
+      style="
+      left: 80px;
+      top: 60px;
+      width: 320px;
+      ">
+      </div>
+
+      <div
+      class="gantt-bar"
+      style="
+      left: 220px;
+      top: 120px;
+      width: 420px;
+      ">
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- RIGHT -->
+
+  <aside class="right-panel glass">
+
+    <div class="info-card glass">
+
+      <h3>今日焦点</h3>
+
+      <div class="focus-item">
+        <strong>产品评审会</strong>
+
+        <p>
+          14:00 - 15:30
+        </p>
+      </div>
+
+    </div>
+
+    <div class="info-card glass">
+
+      <h3>AI Insights</h3>
+
+      <div class="insight">
+        你今天会议较多，
+        AI 建议预留
+        1 小时深度工作时间。
+      </div>
+
+    </div>
+
+    <div class="info-card glass">
+
+      <h3>最近 AI 操作</h3>
+
+      <div class="focus-item">
+        创建产品评审会
+      </div>
+
+      <div class="focus-item">
+        调整 Sprint 时间
+      </div>
+
+    </div>
+
+  </aside>
+
+</div>
+
+</body>
+</html>
