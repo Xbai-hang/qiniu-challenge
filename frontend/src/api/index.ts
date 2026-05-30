@@ -1,4 +1,5 @@
 export * from './auth'
 export * from './health'
 export * from './http'
+export * from './spaces'
 export type * from './types'

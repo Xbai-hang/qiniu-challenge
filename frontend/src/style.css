@@ -139,9 +139,10 @@ a {
 
 .space-switcher {
   gap: 8px;
+  max-width: 360px;
   border: 1px solid var(--border-color);
   border-radius: 999px;
-  padding: 10px 14px;
+  padding: 7px 8px 7px 14px;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text-primary);
   font-size: 14px;
@@ -149,12 +150,70 @@ a {
   white-space: nowrap;
 }
 
+.space-switcher.is-organization .space-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 4px rgba(110, 124, 251, 0.16);
+}
+
 .space-dot {
+  flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.16);
+}
+
+.space-select {
+  min-width: 0;
+  max-width: 260px;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.space-select:disabled {
+  cursor: wait;
+  color: var(--text-secondary);
+}
+
+.space-refresh-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--text-secondary);
+  background: rgba(17, 24, 39, 0.04);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.space-refresh-button:hover {
+  color: var(--primary-deep);
+  background: rgba(110, 124, 251, 0.12);
+  transform: translateY(-1px);
+}
+
+.space-refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+  transform: none;
+}
+
+.space-refresh-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .top-actions {

@@ -13,9 +13,31 @@
         </span>
       </RouterLink>
 
-      <div class="space-switcher" aria-label="当前空间">
+      <div :class="['space-switcher', currentSpace?.type === 'organization' ? 'is-organization' : 'is-personal']">
         <span class="space-dot" aria-hidden="true"></span>
-        <span>个人空间</span>
+        <select
+          v-model.number="selectedSpaceId"
+          class="space-select"
+          :disabled="isSpacesLoading || spaces.length === 0"
+          aria-label="当前日历空间"
+        >
+          <option v-if="isSpacesLoading" :value="null">加载空间中</option>
+          <option v-else-if="spaces.length === 0" :value="null">
+            {{ spacesError || '暂无可用空间' }}
+          </option>
+          <option v-for="space in spaces" :key="space.id" :value="space.id">
+            {{ space.name }} · {{ spaceRoleLabel(space.role) }}
+          </option>
+        </select>
+        <button
+          type="button"
+          class="space-refresh-button"
+          :disabled="isSpacesLoading || isPublicRoute"
+          aria-label="刷新空间列表"
+          @click="loadSpaces"
+        >
+          <Refresh />
+        </button>
       </div>
 
       <nav class="top-actions" aria-label="全局操作">
@@ -50,9 +72,10 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, Calendar, MagicStick, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { Bell, Calendar, MagicStick, Refresh, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getCalendarSpaces, type CalendarSpace } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -60,6 +83,12 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const isPublicRoute = computed(() => Boolean(route.meta.public))
+const spaces = ref<CalendarSpace[]>([])
+const selectedSpaceId = ref<number | null>(null)
+const isSpacesLoading = ref(false)
+const spacesError = ref('')
+
+const currentSpace = computed(() => spaces.value.find((space) => space.id === selectedSpaceId.value) ?? null)
 const userInitial = computed(() => {
   const name = auth.state.user?.displayName || auth.state.user?.username || 'U'
   return name.slice(0, 1).toUpperCase()
@@ -85,6 +114,57 @@ const navigationItems = [
 
 async function handleLogout() {
   await auth.signOut()
+  resetSpaces()
   await router.push({ name: 'login' })
 }
+
+async function loadSpaces() {
+  if (isPublicRoute.value || !auth.state.user) {
+    resetSpaces()
+    return
+  }
+
+  isSpacesLoading.value = true
+  spacesError.value = ''
+
+  try {
+    const data = await getCalendarSpaces({ showErrorMessage: false })
+    spaces.value = data
+
+    if (!data.some((space) => space.id === selectedSpaceId.value)) {
+      selectedSpaceId.value = data[0]?.id ?? null
+    }
+  } catch (error) {
+    spaces.value = []
+    selectedSpaceId.value = null
+    spacesError.value = error instanceof Error ? error.message : '空间加载失败'
+  } finally {
+    isSpacesLoading.value = false
+  }
+}
+
+function resetSpaces() {
+  spaces.value = []
+  selectedSpaceId.value = null
+  spacesError.value = ''
+  isSpacesLoading.value = false
+}
+
+function spaceRoleLabel(role: CalendarSpace['role']) {
+  const roleLabels: Record<CalendarSpace['role'], string> = {
+    owner: 'Owner',
+    admin: 'Admin',
+    member: 'Member',
+  }
+
+  return roleLabels[role]
+}
+
+watch(
+  () => [isPublicRoute.value, auth.state.user?.id] as const,
+  () => {
+    void loadSpaces()
+  },
+  { immediate: true },
+)
 </script>

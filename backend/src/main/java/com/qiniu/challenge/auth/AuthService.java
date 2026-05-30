@@ -2,6 +2,7 @@ package com.qiniu.challenge.auth;
 
 import com.qiniu.challenge.common.ApiException;
 import com.qiniu.challenge.common.ErrorCode;
+import com.qiniu.challenge.space.CalendarSpaceService;
 import com.qiniu.challenge.user.CreateUserCommand;
 import com.qiniu.challenge.user.User;
 import com.qiniu.challenge.user.UserRepository;
@@ -18,11 +19,17 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final CalendarSpaceService calendarSpaceService;
 
-    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthService(
+            UserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            CalendarSpaceService calendarSpaceService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.calendarSpaceService = calendarSpaceService;
     }
 
     @Transactional
@@ -40,6 +47,7 @@ public class AuthService {
                     email,
                     displayName,
                     passwordEncoder.encode(request.password())));
+            calendarSpaceService.createPersonalSpace(user);
             return new RegisterResponse(toResponse(user), jwtService.generateAccessToken(user), null);
         } catch (DuplicateKeyException exception) {
             throw new ApiException(ErrorCode.CONFLICT, "用户名或邮箱已被注册");

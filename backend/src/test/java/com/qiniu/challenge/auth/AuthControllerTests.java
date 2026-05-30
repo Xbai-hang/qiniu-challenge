@@ -63,6 +63,28 @@ class AuthControllerTests {
     }
 
     @Test
+    void registerCreatesPersonalCalendarSpace() throws Exception {
+        register("grace", "grace@example.com");
+
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(1)
+                        FROM calendar_spaces s
+                        JOIN users u ON u.id = s.owner_user_id
+                        WHERE u.username = ?
+                          AND s.type = 'personal'
+                          AND s.name = ?
+                          AND s.organization_id IS NULL
+                          AND s.deleted_at IS NULL
+                        """,
+                Integer.class,
+                "grace",
+                "grace 的个人日历");
+
+        org.hamcrest.MatcherAssert.assertThat(count, org.hamcrest.Matchers.is(1));
+    }
+
+    @Test
     void registerRejectsDuplicateUsername() throws Exception {
         register("bob", "bob@example.com");
 
