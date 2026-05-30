@@ -48,6 +48,8 @@ public record EventCreateRequest(
 
         List<Long> participantUserIds,
 
+        Boolean forceCreateOnConflict,
+
         @Valid
         EventEnterpriseFields enterpriseFields) {
 }

@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS event_participants;
+DROP TABLE IF EXISTS operation_logs;
 DROP TABLE IF EXISTS calendar_events;
 DROP TABLE IF EXISTS calendar_spaces;
 DROP TABLE IF EXISTS organization_members;
@@ -122,3 +123,28 @@ CREATE TABLE event_participants (
 
 CREATE INDEX idx_participants_user ON event_participants (user_id);
 CREATE INDEX idx_participants_event_role ON event_participants (event_id, role);
+
+CREATE TABLE operation_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  conversation_id BIGINT NULL,
+  tool_call_id BIGINT NULL,
+  operation_source VARCHAR(32) NOT NULL,
+  operation_type VARCHAR(64) NOT NULL,
+  target_type VARCHAR(64) NOT NULL,
+  target_id BIGINT NULL,
+  before_snapshot CLOB NULL,
+  after_snapshot CLOB NULL,
+  undoable BOOLEAN NOT NULL DEFAULT FALSE,
+  undone BOOLEAN NOT NULL DEFAULT FALSE,
+  undo_expires_at TIMESTAMP(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_operation_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_operation_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+);
+
+CREATE INDEX idx_operation_user_time ON operation_logs (user_id, created_at);
+CREATE INDEX idx_operation_space_time ON operation_logs (calendar_space_id, created_at);
+CREATE INDEX idx_operation_undo ON operation_logs (user_id, operation_source, undoable, undone, undo_expires_at);
+CREATE INDEX idx_operation_target ON operation_logs (target_type, target_id);

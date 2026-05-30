@@ -63,6 +63,16 @@ public class JdbcEventRepository implements EventRepository {
             rs.getString("role"),
             rs.getString("response_status"));
 
+    private final RowMapper<EventConflict> conflictRowMapper = (rs, rowNum) -> new EventConflict(
+            rs.getLong("event_id"),
+            rs.getLong("calendar_space_id"),
+            rs.getString("calendar_space_name"),
+            "已有安排",
+            rs.getLong("participant_user_id"),
+            rs.getString("participant_name"),
+            toOffsetDateTime(rs.getTimestamp("start_time")),
+            toOffsetDateTime(rs.getTimestamp("end_time")));
+
     public JdbcEventRepository(
             JdbcTemplate jdbcTemplate,
             NamedParameterJdbcTemplate namedJdbcTemplate,
@@ -270,6 +280,50 @@ public class JdbcEventRepository implements EventRepository {
         sql.append(" ORDER BY ").append(sortColumn(request.sortBy())).append(sortDirection(request.sortDirection()))
                 .append(", e.id ASC");
         return namedJdbcTemplate.query(sql.toString(), params, eventRowMapper);
+    }
+
+    @Override
+    public List<EventConflict> findConflicts(
+            long currentUserId,
+            List<Long> participantUserIds,
+            OffsetDateTime start,
+            OffsetDateTime end,
+            Long excludeEventId) {
+        if (participantUserIds == null || participantUserIds.isEmpty()) {
+            return List.of();
+        }
+
+        StringBuilder sql = new StringBuilder("""
+                SELECT
+                  0 AS event_id,
+                  0 AS calendar_space_id,
+                  NULL AS calendar_space_name,
+                  ep.user_id AS participant_user_id,
+                  u.display_name AS participant_name,
+                  e.start_time,
+                  e.end_time
+                FROM calendar_events e
+                JOIN calendar_spaces s ON s.id = e.calendar_space_id
+                JOIN event_participants ep ON ep.event_id = e.id
+                JOIN users u ON u.id = ep.user_id
+                WHERE e.deleted_at IS NULL
+                  AND s.deleted_at IS NULL
+                  AND u.deleted_at IS NULL
+                  AND ep.user_id IN (:participantUserIds)
+                  AND e.end_time > :start
+                  AND e.start_time < :end
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("currentUserId", currentUserId)
+                .addValue("participantUserIds", participantUserIds)
+                .addValue("start", toTimestamp(start))
+                .addValue("end", toTimestamp(end));
+        if (excludeEventId != null) {
+            sql.append(" AND e.id <> :excludeEventId");
+            params.addValue("excludeEventId", excludeEventId);
+        }
+        sql.append(" ORDER BY e.start_time ASC, e.id ASC, ep.user_id ASC");
+        return namedJdbcTemplate.query(sql.toString(), params, conflictRowMapper);
     }
 
     @Override

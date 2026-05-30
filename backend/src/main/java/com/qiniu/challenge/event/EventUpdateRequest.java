@@ -41,6 +41,8 @@ public record EventUpdateRequest(
 
         List<Long> participantUserIds,
 
+        Boolean forceUpdateOnConflict,
+
         @Valid
         EventEnterpriseFields enterpriseFields) {
 }
