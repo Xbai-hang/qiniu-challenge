@@ -45,6 +45,25 @@ public class JdbcCalendarSpaceRepository implements CalendarSpaceRepository {
     }
 
     @Override
+    public void ensurePersonalSpaceExists(long ownerUserId) {
+        jdbcTemplate.update("""
+                INSERT INTO calendar_spaces (type, name, owner_user_id)
+                SELECT 'personal', CONCAT(u.display_name, ' 的个人日历'), u.id
+                FROM users u
+                WHERE u.id = ?
+                  AND u.deleted_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM calendar_spaces s
+                    WHERE s.type = 'personal'
+                      AND s.owner_user_id = u.id
+                      AND s.organization_id IS NULL
+                      AND s.deleted_at IS NULL
+                  )
+                """, ownerUserId);
+    }
+
+    @Override
     public List<CalendarSpaceResponse> findAccessibleSpaces(long userId) {
         return jdbcTemplate.query("""
                 SELECT id, type, name, organization_id, role
