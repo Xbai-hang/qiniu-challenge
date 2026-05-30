@@ -4,7 +4,7 @@
       <div class="command-copy">
         <p class="eyebrow">AI Agent Console</p>
         <h1>今天要安排什么？</h1>
-        <p>用语音或文本驱动日历。手动视图、冲突提示和企业字段会在日历工作台里同步展示。</p>
+        <p>用语音或文本驱动日历。手动视图、冲突提示和企业字段会在日历里同步展示。</p>
       </div>
 
       <button type="button" class="home-voice-button" aria-label="开始语音输入">
@@ -135,7 +135,7 @@ const isHealthLoading = ref(false)
 
 const tools = [
   {
-    title: '日历工作台',
+    title: '日历',
     description: '月历、列表、表格、甘特',
     to: '/calendar',
     icon: Calendar,
@@ -233,7 +233,7 @@ const healthStatusDescription = computed(() => {
     return '前端正在请求健康检查接口。'
   }
   if (health.value?.status === 'UP') {
-    return 'AI 工作台可以继续访问业务 API。'
+    return '首页可以继续访问业务 API。'
   }
   return healthError.value || '请确认后端已启动并监听 8080 端口。'
 })

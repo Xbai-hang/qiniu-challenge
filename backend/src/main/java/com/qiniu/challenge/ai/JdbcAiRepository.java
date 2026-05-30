@@ -1,13 +1,16 @@
 package com.qiniu.challenge.ai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -19,6 +22,10 @@ import org.springframework.stereotype.Repository;
 public class JdbcAiRepository implements AiRepository {
 
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() {
+    };
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
+    };
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -68,6 +75,28 @@ public class JdbcAiRepository implements AiRepository {
             rs.getString("error_message"),
             toOffsetDateTime(rs.getTimestamp("started_at")),
             toOffsetDateTime(rs.getTimestamp("finished_at")));
+
+    private final RowMapper<AiTaskStateResponse> taskStateRowMapper = (rs, rowNum) -> new AiTaskStateResponse(
+            rs.getLong("id"),
+            rs.getLong("conversation_id"),
+            rs.getLong("calendar_space_id"),
+            rs.getString("task_type"),
+            rs.getString("status"),
+            readObjectMap(rs.getString("draft_payload")),
+            readStringList(rs.getString("missing_fields")),
+            rs.getString("risk_level"),
+            toOffsetDateTime(rs.getTimestamp("expires_at")));
+
+    private final RowMapper<PendingConfirmationResponse> confirmationRowMapper = (rs, rowNum) -> new PendingConfirmationResponse(
+            rs.getLong("id"),
+            rs.getLong("conversation_id"),
+            rs.getLong("calendar_space_id"),
+            rs.getString("action_type"),
+            rs.getString("risk_level"),
+            rs.getString("summary"),
+            readObjectMap(rs.getString("payload")),
+            rs.getString("status"),
+            toOffsetDateTime(rs.getTimestamp("expires_at")));
 
     public JdbcAiRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
@@ -262,6 +291,115 @@ public class JdbcAiRepository implements AiRepository {
         return new AiToolCallLogPage(items, normalizedPage, normalizedSize, total == null ? 0 : total);
     }
 
+    @Override
+    public long createTaskState(CreateAiTaskStateCommand command) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO ai_task_states (
+                      conversation_id,
+                      user_id,
+                      calendar_space_id,
+                      task_type,
+                      status,
+                      draft_payload,
+                      missing_fields,
+                      risk_level,
+                      expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, new String[]{"id"});
+            statement.setLong(1, command.conversationId());
+            statement.setLong(2, command.userId());
+            statement.setLong(3, command.calendarSpaceId());
+            statement.setString(4, command.taskType());
+            statement.setString(5, command.status());
+            statement.setString(6, toJson(command.draftPayload()));
+            statement.setString(7, toJson(command.missingFields()));
+            statement.setString(8, command.riskLevel());
+            statement.setTimestamp(9, toTimestamp(command.expiresAt()));
+            return statement;
+        }, keyHolder);
+        return generatedId(keyHolder, "task state");
+    }
+
+    @Override
+    public List<AiTaskStateResponse> findOpenTaskStates(long userId, long conversationId) {
+        return jdbcTemplate.query("""
+                SELECT *
+                FROM ai_task_states
+                WHERE user_id = ?
+                  AND conversation_id = ?
+                  AND status IN ('collecting_info', 'awaiting_confirmation', 'executing')
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                ORDER BY updated_at DESC, id DESC
+                """, taskStateRowMapper, userId, conversationId);
+    }
+
+    @Override
+    public long createPendingConfirmation(CreatePendingConfirmationCommand command) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO pending_confirmations (
+                      conversation_id,
+                      user_id,
+                      calendar_space_id,
+                      action_type,
+                      risk_level,
+                      summary,
+                      payload,
+                      expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, new String[]{"id"});
+            statement.setLong(1, command.conversationId());
+            statement.setLong(2, command.userId());
+            statement.setLong(3, command.calendarSpaceId());
+            statement.setString(4, command.actionType());
+            statement.setString(5, command.riskLevel());
+            statement.setString(6, command.summary());
+            statement.setString(7, toJson(command.payload()));
+            statement.setTimestamp(8, toTimestamp(command.expiresAt()));
+            return statement;
+        }, keyHolder);
+        return generatedId(keyHolder, "pending confirmation");
+    }
+
+    @Override
+    public Optional<PendingConfirmationResponse> findPendingConfirmation(long confirmationId, long userId) {
+        return jdbcTemplate.query("""
+                SELECT *
+                FROM pending_confirmations
+                WHERE id = ?
+                  AND user_id = ?
+                  AND status = 'pending'
+                  AND expires_at > CURRENT_TIMESTAMP
+                """, confirmationRowMapper, confirmationId, userId).stream().findFirst();
+    }
+
+    @Override
+    public List<PendingConfirmationResponse> findPendingConfirmations(long userId) {
+        return jdbcTemplate.query("""
+                SELECT *
+                FROM pending_confirmations
+                WHERE user_id = ?
+                  AND status = 'pending'
+                  AND expires_at > CURRENT_TIMESTAMP
+                ORDER BY created_at DESC, id DESC
+                """, confirmationRowMapper, userId);
+    }
+
+    @Override
+    public void markConfirmation(long confirmationId, String status) {
+        jdbcTemplate.update("""
+                UPDATE pending_confirmations
+                SET status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, status, confirmationId);
+    }
+
     private String toolLogWhere(Long conversationId, Long calendarSpaceId, List<Object> params) {
         StringBuilder sql = new StringBuilder("""
                 WHERE s.deleted_at IS NULL
@@ -294,6 +432,30 @@ public class JdbcAiRepository implements AiRepository {
         }
     }
 
+    private Map<String, Object> readObjectMap(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> value = objectMapper.readValue(json, OBJECT_MAP);
+            return value == null ? Map.of() : new LinkedHashMap<>(value);
+        } catch (JsonProcessingException exception) {
+            return Map.of();
+        }
+    }
+
+    private List<String> readStringList(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<String> value = objectMapper.readValue(json, STRING_LIST);
+            return value == null ? List.of() : value;
+        } catch (JsonProcessingException exception) {
+            return List.of();
+        }
+    }
+
     private long generatedId(KeyHolder keyHolder, String target) {
         Number key = keyHolder.getKey();
         if (key == null) {
@@ -321,5 +483,12 @@ public class JdbcAiRepository implements AiRepository {
             return null;
         }
         return timestamp.toLocalDateTime().atZone(DEFAULT_ZONE).toOffsetDateTime();
+    }
+
+    private static Timestamp toTimestamp(OffsetDateTime value) {
+        if (value == null) {
+            return null;
+        }
+        return Timestamp.valueOf(value.atZoneSameInstant(DEFAULT_ZONE).toLocalDateTime());
     }
 }

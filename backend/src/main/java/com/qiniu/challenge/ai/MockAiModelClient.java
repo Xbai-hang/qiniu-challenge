@@ -1,11 +1,11 @@
 package com.qiniu.challenge.ai;
 
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnMissingBean(AiModelClient.class)
+@ConditionalOnProperty(name = "app.ai.provider", havingValue = "mock", matchIfMissing = true)
 public class MockAiModelClient implements AiModelClient {
 
     @Override

@@ -23,6 +23,19 @@
 
 ## 本地开发启动
 
+### AI 模型中转站配置
+
+后端会从仓库根目录 `.env` 读取模型配置，前端不会接触 API Key。接 OpenAI-compatible 中转站时写入：
+
+```properties
+AI_PROVIDER=openai-compatible
+AI_BASE_URL=https://your-relay.example.com/v1
+AI_API_KEY=your_api_key
+AI_MODEL=your_model_name
+```
+
+如果暂时不配置模型，默认 `AI_PROVIDER=mock`，文本对话接口仍会使用内置规则完成基础查询、创建、确认和撤销演示流程。
+
 ### 启动后端
 
 ```bash
@@ -124,4 +137,3 @@ Docker Compose 配置检查：
 ```bash
 docker compose config
 ```
-
