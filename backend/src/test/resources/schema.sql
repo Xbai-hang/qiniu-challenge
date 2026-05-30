@@ -1,5 +1,8 @@
 DROP TABLE IF EXISTS event_participants;
 DROP TABLE IF EXISTS operation_logs;
+DROP TABLE IF EXISTS ai_tool_call_logs;
+DROP TABLE IF EXISTS ai_messages;
+DROP TABLE IF EXISTS ai_conversations;
 DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS event_reminders;
 DROP TABLE IF EXISTS calendar_events;
@@ -126,6 +129,74 @@ CREATE TABLE event_participants (
 CREATE INDEX idx_participants_user ON event_participants (user_id);
 CREATE INDEX idx_participants_event_role ON event_participants (event_id, role);
 
+CREATE TABLE ai_conversations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  title VARCHAR(200) NULL,
+  channel VARCHAR(32) NOT NULL,
+  ai_prompt_version VARCHAR(64) NOT NULL,
+  tool_schema_version VARCHAR(64) NOT NULL,
+  model_provider VARCHAR(64) NULL,
+  model_name VARCHAR(128) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_conversations_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_conversations_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+);
+
+CREATE INDEX idx_conversations_user_time ON ai_conversations (user_id, created_at);
+CREATE INDEX idx_conversations_space_time ON ai_conversations (calendar_space_id, created_at);
+
+CREATE TABLE ai_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  conversation_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  role VARCHAR(32) NOT NULL,
+  input_mode VARCHAR(32) NULL,
+  content CLOB NOT NULL,
+  structured_payload CLOB NULL,
+  transcription_id BIGINT NULL,
+  ai_prompt_version VARCHAR(64) NULL,
+  tool_schema_version VARCHAR(64) NULL,
+  model_provider VARCHAR(64) NULL,
+  model_name VARCHAR(128) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
+  CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE INDEX idx_messages_conversation_time ON ai_messages (conversation_id, created_at);
+CREATE INDEX idx_messages_user_time ON ai_messages (user_id, created_at);
+CREATE INDEX idx_messages_transcription ON ai_messages (transcription_id);
+
+CREATE TABLE ai_tool_call_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  conversation_id BIGINT NOT NULL,
+  message_id BIGINT NULL,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  tool_name VARCHAR(128) NOT NULL,
+  risk_level VARCHAR(32) NOT NULL,
+  required_permission VARCHAR(128) NULL,
+  input_payload CLOB NULL,
+  output_payload CLOB NULL,
+  status VARCHAR(32) NOT NULL,
+  error_code VARCHAR(64) NULL,
+  error_message CLOB NULL,
+  started_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  finished_at TIMESTAMP(3) NULL,
+  CONSTRAINT fk_tool_logs_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
+  CONSTRAINT fk_tool_logs_message FOREIGN KEY (message_id) REFERENCES ai_messages (id),
+  CONSTRAINT fk_tool_logs_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_tool_logs_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+);
+
+CREATE INDEX idx_tool_logs_conversation_time ON ai_tool_call_logs (conversation_id, started_at);
+CREATE INDEX idx_tool_logs_user_time ON ai_tool_call_logs (user_id, started_at);
+CREATE INDEX idx_tool_logs_tool_name ON ai_tool_call_logs (tool_name);
+
 CREATE TABLE operation_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -143,7 +214,9 @@ CREATE TABLE operation_logs (
   undo_expires_at TIMESTAMP(3) NULL,
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_operation_user FOREIGN KEY (user_id) REFERENCES users (id),
-  CONSTRAINT fk_operation_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+  CONSTRAINT fk_operation_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_operation_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
+  CONSTRAINT fk_operation_tool_call FOREIGN KEY (tool_call_id) REFERENCES ai_tool_call_logs (id)
 );
 
 CREATE INDEX idx_operation_user_time ON operation_logs (user_id, created_at);
