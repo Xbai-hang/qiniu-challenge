@@ -70,6 +70,28 @@ class CalendarSpaceControllerTests {
                 .andExpect(jsonPath("$.data[1].role").value("admin"));
     }
 
+    @Test
+    void mySpacesBackfillsPersonalSpaceForLegacyUser() throws Exception {
+        RegisteredUser user = register("space_legacy", "space-legacy@example.com", "Space Legacy");
+        jdbcTemplate.update("""
+                DELETE FROM calendar_spaces
+                WHERE owner_user_id = ?
+                  AND type = 'personal'
+                """, user.id());
+        long organizationId = createOrganization(user.id(), "Legacy 团队", "SPACE_LEGACY_ALPHA");
+        createOrganizationMember(organizationId, user.id(), "member");
+        createOrganizationSpace(organizationId, "Legacy 团队");
+
+        mockMvc.perform(get("/api/spaces")
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data[0].type").value("personal"))
+                .andExpect(jsonPath("$.data[0].name").value("Space Legacy 的个人日历"))
+                .andExpect(jsonPath("$.data[1].type").value("organization"))
+                .andExpect(jsonPath("$.data[1].organizationId").value(organizationId));
+    }
+
     private RegisteredUser register(String username, String email, String displayName) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

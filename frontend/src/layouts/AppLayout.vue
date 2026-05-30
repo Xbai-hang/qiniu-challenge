@@ -73,7 +73,7 @@
 
 <script setup lang="ts">
 import { Bell, Calendar, MagicStick, Refresh, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCalendarSpaces, type CalendarSpace } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -87,6 +87,7 @@ const spaces = ref<CalendarSpace[]>([])
 const selectedSpaceId = ref<number | null>(null)
 const isSpacesLoading = ref(false)
 const spacesError = ref('')
+const WORKSPACE_UPDATED_EVENT = 'organization-workspace-updated'
 
 const currentSpace = computed(() => spaces.value.find((space) => space.id === selectedSpaceId.value) ?? null)
 const userInitial = computed(() => {
@@ -160,6 +161,10 @@ function spaceRoleLabel(role: CalendarSpace['role']) {
   return roleLabels[role]
 }
 
+function handleWorkspaceUpdated() {
+  void loadSpaces()
+}
+
 watch(
   () => [isPublicRoute.value, auth.state.user?.id] as const,
   () => {
@@ -167,4 +172,12 @@ watch(
   },
   { immediate: true },
 )
+
+onMounted(() => {
+  window.addEventListener(WORKSPACE_UPDATED_EVENT, handleWorkspaceUpdated)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(WORKSPACE_UPDATED_EVENT, handleWorkspaceUpdated)
+})
 </script>

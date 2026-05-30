@@ -18,6 +18,7 @@ public class CalendarSpaceService {
     }
 
     public List<CalendarSpaceResponse> findAccessibleSpaces(long userId) {
+        calendarSpaceRepository.ensurePersonalSpaceExists(userId);
         return calendarSpaceRepository.findAccessibleSpaces(userId);
     }
 }
