@@ -6,10 +6,12 @@
   <div v-else class="app-shell">
     <header class="top-bar">
       <RouterLink class="brand" to="/" aria-label="返回 AI 工作台">
-        <span class="brand-mark" aria-hidden="true">AI</span>
+        <span class="brand-mark" aria-hidden="true">
+          <span class="brand-wave"></span>
+        </span>
         <span>
-          <strong>语音日历</strong>
-          <small>AI Native Productivity OS</small>
+          <strong>语历</strong>
+          <small>Vocalendar</small>
         </span>
       </RouterLink>
 
