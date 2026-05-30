@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import CalendarView from '../views/CalendarView.vue'
 import DashboardView from '../views/DashboardView.vue'
+import LoginView from '../views/LoginView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -12,6 +14,15 @@ const router = createRouter({
       component: DashboardView,
       meta: {
         title: 'AI 工作台',
+      },
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: LoginView,
+      meta: {
+        title: '登录',
+        public: true,
       },
     },
     {
@@ -35,6 +46,26 @@ const router = createRouter({
       redirect: '/',
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  const user = await auth.restoreSession()
+
+  if (to.meta.public) {
+    return user && to.name === 'login' ? { name: 'dashboard' } : true
+  }
+
+  if (!user) {
+    return {
+      name: 'login',
+      query: {
+        redirect: to.fullPath,
+      },
+    }
+  }
+
+  return true
 })
 
 export default router
