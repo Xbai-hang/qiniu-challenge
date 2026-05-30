@@ -1,6 +1,8 @@
 DROP TABLE IF EXISTS event_participants;
 DROP TABLE IF EXISTS operation_logs;
 DROP TABLE IF EXISTS ai_tool_call_logs;
+DROP TABLE IF EXISTS pending_confirmations;
+DROP TABLE IF EXISTS ai_task_states;
 DROP TABLE IF EXISTS ai_messages;
 DROP TABLE IF EXISTS ai_conversations;
 DROP TABLE IF EXISTS notifications;
@@ -170,6 +172,48 @@ CREATE TABLE ai_messages (
 CREATE INDEX idx_messages_conversation_time ON ai_messages (conversation_id, created_at);
 CREATE INDEX idx_messages_user_time ON ai_messages (user_id, created_at);
 CREATE INDEX idx_messages_transcription ON ai_messages (transcription_id);
+
+CREATE TABLE ai_task_states (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  conversation_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  task_type VARCHAR(64) NOT NULL,
+  status VARCHAR(64) NOT NULL,
+  draft_payload CLOB NULL,
+  missing_fields CLOB NULL,
+  risk_level VARCHAR(32) NULL,
+  expires_at TIMESTAMP(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_task_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
+  CONSTRAINT fk_task_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_task_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+);
+
+CREATE INDEX idx_task_conversation_status ON ai_task_states (conversation_id, status);
+CREATE INDEX idx_task_user_status ON ai_task_states (user_id, status, updated_at);
+
+CREATE TABLE pending_confirmations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  conversation_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  action_type VARCHAR(64) NOT NULL,
+  risk_level VARCHAR(32) NOT NULL,
+  summary CLOB NOT NULL,
+  payload CLOB NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  expires_at TIMESTAMP(3) NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_confirmations_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
+  CONSTRAINT fk_confirmations_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_confirmations_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id)
+);
+
+CREATE INDEX idx_confirmations_user_status ON pending_confirmations (user_id, status, expires_at);
+CREATE INDEX idx_confirmations_conversation ON pending_confirmations (conversation_id);
 
 CREATE TABLE ai_tool_call_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

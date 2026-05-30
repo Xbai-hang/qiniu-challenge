@@ -27,6 +27,8 @@ public interface EventRepository {
 
     boolean softDeleteEvent(long eventId);
 
+    boolean restoreDeletedEvent(long eventId);
+
     List<EventParticipant> findParticipants(long eventId);
 
     void replaceParticipants(long eventId, List<ParticipantCommand> participants);

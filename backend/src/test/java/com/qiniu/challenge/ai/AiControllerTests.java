@@ -212,6 +212,106 @@ class AiControllerTests {
                 .andExpect(jsonPath("$.data.items[0].errorCode").value("FORBIDDEN"));
     }
 
+    @Test
+    void chatCanCreateEventAndUndoLastAiOperation() throws Exception {
+        RegisteredUser user = register("ai_chat_create_user", "ai-chat-create-user@example.com", "AI Chat Create");
+
+        MvcResult chatResult = mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "text",
+                                  "message": "明天下午三点安排项目复盘"
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversationId", notNullValue()))
+                .andExpect(jsonPath("$.data.resultCard.type").value("event_created"))
+                .andExpect(jsonPath("$.data.toolCalls[0].toolName").value("create_event"))
+                .andReturn();
+        long eventId = data(chatResult).path("resultCard").path("eventId").asLong();
+
+        Integer created = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM calendar_events WHERE id = ? AND deleted_at IS NULL",
+                Integer.class,
+                eventId);
+        MatcherAssert.assertThat(created, Matchers.is(1));
+
+        mockMvc.perform(post("/api/ai/undo-last")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.undone").value(true));
+
+        Integer visibleAfterUndo = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM calendar_events WHERE id = ? AND deleted_at IS NULL",
+                Integer.class,
+                eventId);
+        MatcherAssert.assertThat(visibleAfterUndo, Matchers.is(0));
+    }
+
+    @Test
+    void chatListEventsIncludesEventDetailsInReply() throws Exception {
+        RegisteredUser user = register("ai_chat_list_user", "ai-chat-list-user@example.com", "AI Chat List");
+        createEvent(user, "范围内日程");
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "text",
+                                  "message": "当前范围内的日程请你告诉我"
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reply").value(Matchers.containsString("范围内日程")))
+                .andExpect(jsonPath("$.data.reply").value(Matchers.containsString("05-30 12:00")))
+                .andExpect(jsonPath("$.data.toolCalls[0].toolName").value("list_events"));
+    }
+
+    @Test
+    void confirmationCanExecuteHighRiskDeleteFromChat() throws Exception {
+        RegisteredUser user = register("ai_chat_delete_user", "ai-chat-delete-user@example.com", "AI Chat Delete");
+        long eventId = createEvent(user, "确认删除目标");
+
+        MvcResult chatResult = mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "text",
+                                  "message": "删除 %d"
+                                }
+                                """.formatted(user.personalSpaceId(), eventId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.confirmations[0].actionType").value("delete_event"))
+                .andExpect(jsonPath("$.data.toolCalls[0].status").value("confirmation_required"))
+                .andReturn();
+        long confirmationId = data(chatResult).path("confirmations").path(0).path("id").asLong();
+
+        mockMvc.perform(post("/api/ai/confirmations/{confirmationId}/confirm", confirmationId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("confirmed"))
+                .andExpect(jsonPath("$.data.resultCard.type").value("event_deleted"));
+
+        Integer visible = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM calendar_events WHERE id = ? AND deleted_at IS NULL",
+                Integer.class,
+                eventId);
+        MatcherAssert.assertThat(visible, Matchers.is(0));
+    }
+
     private long createEvent(RegisteredUser user, String title) throws Exception {
         MvcResult created = mockMvc.perform(post("/api/ai/tools/create_event/execute")
                         .header("Authorization", "Bearer " + user.token())

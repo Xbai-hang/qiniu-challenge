@@ -6,6 +6,7 @@
       :is-loading="isEventsLoading"
       :conflict-count="conflictIds.size"
       @create="openCreateDialog"
+      @refresh="loadEvents"
     />
 
     <CalendarWorkspace
@@ -165,7 +166,7 @@
 <script setup lang="ts">
 import { Check, Delete } from '@element-plus/icons-vue'
 import { ElDialog, ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   ApiClientError,
   checkEventConflicts,
@@ -754,10 +755,19 @@ watch(
   },
 )
 
+function handleAiCalendarUpdated() {
+  void loadEvents()
+}
+
 onMounted(async () => {
+  window.addEventListener('ai-calendar-updated', handleAiCalendarUpdated)
   await auth.restoreSession()
   await workspace.loadSpaces()
   await loadMembers()
   await loadEvents()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('ai-calendar-updated', handleAiCalendarUpdated)
 })
 </script>

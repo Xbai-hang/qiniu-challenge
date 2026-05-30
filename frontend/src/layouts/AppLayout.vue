@@ -5,7 +5,7 @@
 
   <div v-else class="app-shell">
     <header class="top-bar">
-      <RouterLink class="brand" to="/" aria-label="返回 AI 工作台">
+      <RouterLink class="brand" to="/" aria-label="返回首页">
         <span class="brand-mark" aria-hidden="true">
           <span class="brand-wave"></span>
         </span>
@@ -82,14 +82,17 @@
     <RouterView v-slot="{ Component, route }">
       <component :is="Component" :key="String(route.name ?? route.path)" />
     </RouterView>
+
+    <GlobalAiAssistant />
   </div>
 </template>
 
 <script setup lang="ts">
-import { Bell, Calendar, Document, MagicStick, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { Bell, Calendar, ChatDotRound, Document, MagicStick, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { AppNotification } from '../api'
+import GlobalAiAssistant from '../components/GlobalAiAssistant.vue'
 import { useNotifications } from '../composables/useNotifications'
 import { useAuthStore } from '../stores/auth'
 import { useWorkspaceStore } from '../stores/workspace'
@@ -112,13 +115,18 @@ const userInitial = computed(() => {
 const navigationItems = [
   {
     to: '/',
-    label: 'AI 工作台',
+    label: '首页',
     icon: MagicStick,
   },
   {
     to: '/calendar',
     label: '日历',
     icon: Calendar,
+  },
+  {
+    to: '/ai-chat',
+    label: 'AI 对话',
+    icon: ChatDotRound,
   },
   {
     to: '/operation-logs',
