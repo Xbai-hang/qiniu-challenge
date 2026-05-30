@@ -87,6 +87,13 @@ public class EventController {
         return ApiResponse.success(eventService.deleteEvent(principal.userId(), eventId));
     }
 
+    @PostMapping("/conflicts/check")
+    public ApiResponse<ConflictCheckResponse> checkConflicts(
+            @AuthenticationPrincipal CurrentUserPrincipal principal,
+            @Valid @RequestBody ConflictCheckRequest request) {
+        return ApiResponse.success(eventService.checkConflicts(principal.userId(), request));
+    }
+
     @GetMapping("/search")
     public ApiResponse<List<EventResponse>> searchEvents(
             @AuthenticationPrincipal CurrentUserPrincipal principal,

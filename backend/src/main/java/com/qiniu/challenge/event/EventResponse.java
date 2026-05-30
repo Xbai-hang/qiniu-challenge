@@ -30,9 +30,19 @@ public record EventResponse(
         String notes,
         String customFields,
         int version,
-        List<EventParticipant> participants) {
+        List<EventParticipant> participants,
+        List<EventConflict> conflicts,
+        boolean requiresConfirmation) {
 
     public static EventResponse of(CalendarEvent event, List<EventParticipant> participants) {
+        return of(event, participants, List.of());
+    }
+
+    public static EventResponse of(
+            CalendarEvent event,
+            List<EventParticipant> participants,
+            List<EventConflict> conflicts) {
+        List<EventConflict> normalizedConflicts = conflicts == null ? List.of() : conflicts;
         return new EventResponse(
                 event.id(),
                 event.calendarSpaceId(),
@@ -60,6 +70,8 @@ public record EventResponse(
                 event.notes(),
                 event.customFields(),
                 event.version(),
-                participants);
+                participants,
+                normalizedConflicts,
+                !normalizedConflicts.isEmpty());
     }
 }
