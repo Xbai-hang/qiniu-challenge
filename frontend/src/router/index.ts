@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import CalendarView from '../views/CalendarView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
+import OperationLogsView from '../views/OperationLogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -31,6 +32,14 @@ const router = createRouter({
       component: CalendarView,
       meta: {
         title: '日历',
+      },
+    },
+    {
+      path: '/operation-logs',
+      name: 'operation-logs',
+      component: OperationLogsView,
+      meta: {
+        title: '操作日志记录',
       },
     },
     {

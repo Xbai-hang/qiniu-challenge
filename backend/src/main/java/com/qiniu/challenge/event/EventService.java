@@ -4,8 +4,10 @@ import com.qiniu.challenge.common.ApiException;
 import com.qiniu.challenge.common.ErrorCode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,16 +23,29 @@ public class EventService {
     private static final String ATTENDEE = "attendee";
     private static final String NEEDS_ACTION = "needs_action";
     private static final String ACCEPTED = "accepted";
+    private static final String MANUAL_SOURCE = "manual";
+    private static final String EVENT_TARGET = "event";
 
     private final EventRepository eventRepository;
+    private final PermissionService permissionService;
+    private final ConflictService conflictService;
+    private final OperationLogRepository operationLogRepository;
 
-    public EventService(EventRepository eventRepository) {
+    public EventService(
+            EventRepository eventRepository,
+            PermissionService permissionService,
+            ConflictService conflictService,
+            OperationLogRepository operationLogRepository) {
         this.eventRepository = eventRepository;
+        this.permissionService = permissionService;
+        this.conflictService = conflictService;
+        this.operationLogRepository = operationLogRepository;
     }
 
     @Transactional
     public EventResponse createEvent(long currentUserId, EventCreateRequest request) {
-        CalendarSpaceAccess space = requireAccessibleSpace(request.calendarSpaceId(), currentUserId);
+        CalendarSpaceAccess space = permissionService.requireSpaceAccess(request.calendarSpaceId(), currentUserId);
+        permissionService.requireCanCreateEvent(space);
         OffsetDateTime startTime = request.startTime() == null ? eventRepository.now() : request.startTime();
         OffsetDateTime endTime = request.endTime() == null ? startTime.plusMinutes(60) : request.endTime();
         validateTimeRange(startTime, endTime);
@@ -67,9 +82,29 @@ public class EventService {
                 fields == null ? null : blankToNull(fields.customFields()),
                 0);
 
+        List<ParticipantCommand> participants = buildParticipants(currentUserId, request.participantUserIds());
+        List<EventConflict> conflicts = conflictService.detectConflicts(
+                currentUserId,
+                participants.stream().map(ParticipantCommand::userId).toList(),
+                startTime,
+                endTime,
+                null);
+        requireConflictConfirmation(conflicts, request.forceCreateOnConflict());
+
         long eventId = eventRepository.createEvent(event);
-        eventRepository.replaceParticipants(eventId, buildParticipants(currentUserId, request.participantUserIds()));
-        return getEvent(currentUserId, eventId);
+        eventRepository.replaceParticipants(eventId, participants);
+        EventResponse created = snapshot(eventId);
+        operationLogRepository.create(new OperationLogEntry(
+                currentUserId,
+                created.calendarSpaceId(),
+                MANUAL_SOURCE,
+                "create",
+                EVENT_TARGET,
+                created.id(),
+                null,
+                created,
+                false));
+        return snapshot(eventId, conflicts);
     }
 
     public EventResponse getEvent(long currentUserId, long eventId) {
@@ -91,7 +126,7 @@ public class EventService {
             String sortBy,
             String sortDirection) {
         if (calendarSpaceId != null) {
-            requireAccessibleSpace(calendarSpaceId, currentUserId);
+            permissionService.requireSpaceAccess(calendarSpaceId, currentUserId);
         }
         if (start != null && end != null) {
             validateTimeRange(start, end);
@@ -109,7 +144,7 @@ public class EventService {
                 sortBy,
                 sortDirection);
         return eventRepository.findEvents(request, currentUserId).stream()
-                .map(event -> EventResponse.of(event, eventRepository.findParticipants(event.id())))
+                .map(event -> eventWithConflicts(currentUserId, event))
                 .toList();
     }
 
@@ -133,8 +168,10 @@ public class EventService {
 
     @Transactional
     public EventResponse updateEvent(long currentUserId, long eventId, EventUpdateRequest request) {
-        CalendarEvent existing = requireVisibleEvent(currentUserId, eventId);
-        CalendarSpaceAccess space = requireAccessibleSpace(existing.calendarSpaceId(), currentUserId);
+        CalendarEvent existing = requireEventForWrite(currentUserId, eventId);
+        CalendarSpaceAccess space = permissionService.requireSpaceAccess(existing.calendarSpaceId(), currentUserId);
+        permissionService.requireCanUpdateEvent(space, existing, currentUserId);
+        EventResponse beforeSnapshot = EventResponse.of(existing, eventRepository.findParticipants(eventId));
         int expectedVersion = request.version() == null ? existing.version() : request.version();
 
         OffsetDateTime startTime = request.startTime() == null ? existing.startTime() : request.startTime();
@@ -147,6 +184,21 @@ public class EventService {
                 : fields.ownerUserId();
         List<Long> requestedParticipants = request.participantUserIds();
         validateEnterpriseUsers(space, currentUserId, requestedParticipants, ownerUserId);
+        List<ParticipantCommand> finalParticipants = requestedParticipants == null
+                ? eventRepository.findParticipants(eventId).stream()
+                        .map(participant -> new ParticipantCommand(
+                                participant.userId(),
+                                participant.role(),
+                                participant.responseStatus()))
+                        .toList()
+                : buildParticipants(existing.createdBy(), requestedParticipants);
+        List<EventConflict> conflicts = conflictService.detectConflicts(
+                currentUserId,
+                finalParticipants.stream().map(ParticipantCommand::userId).toList(),
+                startTime,
+                endTime,
+                eventId);
+        requireConflictConfirmation(conflicts, request.forceUpdateOnConflict());
 
         CalendarEvent updated = new CalendarEvent(
                 existing.id(),
@@ -181,25 +233,54 @@ public class EventService {
         }
 
         if (requestedParticipants != null) {
-            eventRepository.replaceParticipants(eventId, buildParticipants(existing.createdBy(), requestedParticipants));
+            eventRepository.replaceParticipants(eventId, finalParticipants);
         }
-        return getEvent(currentUserId, eventId);
+        EventResponse afterSnapshot = snapshot(eventId);
+        operationLogRepository.create(new OperationLogEntry(
+                currentUserId,
+                afterSnapshot.calendarSpaceId(),
+                MANUAL_SOURCE,
+                "update",
+                EVENT_TARGET,
+                afterSnapshot.id(),
+                beforeSnapshot,
+                afterSnapshot,
+                false));
+        return snapshot(eventId, conflicts);
     }
 
     @Transactional
     public boolean deleteEvent(long currentUserId, long eventId) {
-        CalendarEvent event = requireVisibleEvent(currentUserId, eventId);
-        requireAccessibleSpace(event.calendarSpaceId(), currentUserId);
+        CalendarEvent event = requireEventForWrite(currentUserId, eventId);
+        CalendarSpaceAccess space = permissionService.requireSpaceAccess(event.calendarSpaceId(), currentUserId);
+        permissionService.requireCanDeleteEvent(space, event, currentUserId);
+        EventResponse beforeSnapshot = EventResponse.of(event, eventRepository.findParticipants(eventId));
         if (!eventRepository.softDeleteEvent(eventId)) {
             throw new ApiException(ErrorCode.NOT_FOUND, "事件不存在");
         }
+        operationLogRepository.create(new OperationLogEntry(
+                currentUserId,
+                event.calendarSpaceId(),
+                MANUAL_SOURCE,
+                "delete",
+                EVENT_TARGET,
+                eventId,
+                beforeSnapshot,
+                null,
+                false));
         return true;
+    }
+
+    public ConflictCheckResponse checkConflicts(long currentUserId, ConflictCheckRequest request) {
+        CalendarSpaceAccess space = permissionService.requireSpaceAccess(request.calendarSpaceId(), currentUserId);
+        validateEnterpriseUsers(space, currentUserId, request.participantUserIds(), null);
+        return conflictService.checkConflicts(currentUserId, request);
     }
 
     private CalendarEvent requireVisibleEvent(long currentUserId, long eventId) {
         CalendarEvent event = eventRepository.findEvent(eventId)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "事件不存在"));
-        requireAccessibleSpace(event.calendarSpaceId(), currentUserId);
+        permissionService.requireSpaceAccess(event.calendarSpaceId(), currentUserId);
         if (!"space".equals(event.visibility())
                 && event.createdBy() != currentUserId
                 && !eventRepository.isParticipant(event.id(), currentUserId)) {
@@ -208,9 +289,42 @@ public class EventService {
         return event;
     }
 
-    private CalendarSpaceAccess requireAccessibleSpace(long spaceId, long currentUserId) {
-        return eventRepository.findAccessibleSpace(spaceId, currentUserId)
-                .orElseThrow(() -> new ApiException(ErrorCode.FORBIDDEN, "无权访问该日历空间"));
+    private CalendarEvent requireEventForWrite(long currentUserId, long eventId) {
+        CalendarEvent event = eventRepository.findEvent(eventId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "事件不存在"));
+        permissionService.requireSpaceAccess(event.calendarSpaceId(), currentUserId);
+        return event;
+    }
+
+    private EventResponse snapshot(long eventId) {
+        return snapshot(eventId, List.of());
+    }
+
+    private EventResponse snapshot(long eventId, List<EventConflict> conflicts) {
+        CalendarEvent event = eventRepository.findEvent(eventId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "事件不存在"));
+        return EventResponse.of(event, eventRepository.findParticipants(eventId), conflicts);
+    }
+
+    private EventResponse eventWithConflicts(long currentUserId, CalendarEvent event) {
+        List<EventParticipant> participants = eventRepository.findParticipants(event.id());
+        List<EventConflict> conflicts = conflictService.detectConflicts(
+                currentUserId,
+                participants.stream().map(EventParticipant::userId).toList(),
+                event.startTime(),
+                event.endTime(),
+                event.id());
+        return EventResponse.of(event, participants, conflicts);
+    }
+
+    private void requireConflictConfirmation(List<EventConflict> conflicts, Boolean forceOnConflict) {
+        if (conflicts == null || conflicts.isEmpty() || Boolean.TRUE.equals(forceOnConflict)) {
+            return;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("requiresConfirmation", true);
+        details.put("conflicts", conflicts);
+        throw new ApiException(ErrorCode.CONFLICT, "该时间段存在日程冲突，请确认是否继续", details);
     }
 
     private void validateEnterpriseUsers(

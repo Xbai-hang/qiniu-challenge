@@ -162,6 +162,325 @@ class EventControllerTests {
     }
 
     @Test
+    void memberCannotUpdateOrganizationEventCreatedByAnotherUser() throws Exception {
+        OrganizationFixture fixture = createOrganizationFixture("event_member_write");
+        MvcResult created = createEvent(fixture.owner(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "Owner 事件",
+                  "startTime": "2026-05-30T10:00:00+08:00",
+                  "endTime": "2026-05-30T11:00:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(fixture.spaceId(), fixture.member().id()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long eventId = data(created).path("id").asLong();
+
+        mockMvc.perform(patch("/api/events/{eventId}", eventId)
+                        .header("Authorization", "Bearer " + fixture.member().token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Member 越权修改"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void adminCanUpdateOrganizationEventEvenWhenVisibilityIsParticipants() throws Exception {
+        OrganizationFixture fixture = createOrganizationFixture("event_admin_write");
+        MvcResult created = createEvent(fixture.owner(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "仅参与人可见",
+                  "startTime": "2026-05-30T10:00:00+08:00",
+                  "endTime": "2026-05-30T11:00:00+08:00",
+                  "visibility": "participants",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(fixture.spaceId(), fixture.owner().id()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long eventId = data(created).path("id").asLong();
+
+        mockMvc.perform(patch("/api/events/{eventId}", eventId)
+                        .header("Authorization", "Bearer " + fixture.admin().token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Admin 已修改"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("Admin 已修改"));
+    }
+
+    @Test
+    void manualEventWritesCreateUpdateAndDeleteOperationLogs() throws Exception {
+        RegisteredUser user = register("event_log_owner", "event-log-owner@example.com", "Log Owner");
+        MvcResult created = createEvent(user, eventJson(user.personalSpaceId(), "日志事件", "2026-05-30T09:00:00+08:00",
+                "2026-05-30T10:00:00+08:00", "Apollo", user.id(), "todo", "low", "log"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long eventId = data(created).path("id").asLong();
+
+        mockMvc.perform(patch("/api/events/{eventId}", eventId)
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "日志事件更新"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/api/events/{eventId}", eventId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk());
+
+        Integer logCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(1)
+                FROM operation_logs
+                WHERE user_id = ?
+                  AND target_type = 'event'
+                  AND target_id = ?
+                  AND operation_source = 'manual'
+                  AND operation_type IN ('create', 'update', 'delete')
+                """, Integer.class, user.id(), eventId);
+        org.hamcrest.MatcherAssert.assertThat(logCount, org.hamcrest.Matchers.is(3));
+    }
+
+    @Test
+    void operationLogsCanBeListedAndExported() throws Exception {
+        RegisteredUser user = register("event_log_query", "event-log-query@example.com", "Log Query");
+        MvcResult created = createEvent(user, eventJson(user.personalSpaceId(), "可审计事件", "2026-05-30T09:00:00+08:00",
+                "2026-05-30T10:00:00+08:00", "Apollo", user.id(), "todo", "low", "audit"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long eventId = data(created).path("id").asLong();
+
+        mockMvc.perform(get("/api/operation-logs")
+                        .header("Authorization", "Bearer " + user.token())
+                        .param("calendarSpaceId", String.valueOf(user.personalSpaceId()))
+                        .param("operationSource", "manual")
+                        .param("targetType", "event")
+                        .param("page", "1")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].operationSource").value("manual"))
+                .andExpect(jsonPath("$.data.items[0].operationType").value("create"))
+                .andExpect(jsonPath("$.data.items[0].targetType").value("event"))
+                .andExpect(jsonPath("$.data.items[0].targetId").value(eventId))
+                .andExpect(jsonPath("$.data.items[0].afterSnapshot")
+                        .value(org.hamcrest.Matchers.containsString("可审计事件")));
+
+        mockMvc.perform(get("/api/operation-logs/export")
+                        .header("Authorization", "Bearer " + user.token())
+                        .param("calendarSpaceId", String.valueOf(user.personalSpaceId()))
+                        .param("operationSource", "manual")
+                        .param("targetType", "event"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Content-Disposition", org.hamcrest.Matchers.containsString("operation-logs.csv")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.containsString("可审计事件")));
+    }
+
+    @Test
+    void conflictCreateAndUpdateRequireConfirmationUnlessForced() throws Exception {
+        RegisteredUser user = register("event_conflict_owner", "event-conflict-owner@example.com", "Conflict Owner");
+        MvcResult first = createEvent(user, """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "已有会议",
+                  "startTime": "2026-05-30T10:00:00+08:00",
+                  "endTime": "2026-05-30T11:00:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(user.personalSpaceId(), user.id()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long firstEventId = data(first).path("id").asLong();
+
+        createEvent(user, """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "冲突会议",
+                  "startTime": "2026-05-30T10:30:00+08:00",
+                  "endTime": "2026-05-30T11:30:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(user.personalSpaceId(), user.id()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CONFLICT"))
+                .andExpect(jsonPath("$.error.details.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.error.details.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.error.details.conflicts[0].title").value("已有安排"))
+                .andExpect(jsonPath("$.error.details.conflicts[0].participantUserId").value(user.id()));
+
+        MvcResult second = createEvent(user, """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "冲突会议",
+                  "startTime": "2026-05-30T10:30:00+08:00",
+                  "endTime": "2026-05-30T11:30:00+08:00",
+                  "participantUserIds": [%d],
+                  "forceCreateOnConflict": true
+                }
+                """.formatted(user.personalSpaceId(), user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.data.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.data.conflicts[0].participantUserId").value(user.id()))
+                .andReturn();
+        long secondEventId = data(second).path("id").asLong();
+
+        mockMvc.perform(patch("/api/events/{eventId}", secondEventId)
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "startTime": "2026-05-30T11:30:00+08:00",
+                                  "endTime": "2026-05-30T12:30:00+08:00"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.requiresConfirmation").value(false))
+                .andExpect(jsonPath("$.data.conflicts.length()").value(0));
+
+        mockMvc.perform(patch("/api/events/{eventId}", secondEventId)
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "startTime": "2026-05-30T10:15:00+08:00",
+                                  "endTime": "2026-05-30T10:45:00+08:00"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CONFLICT"))
+                .andExpect(jsonPath("$.error.details.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.error.details.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.error.details.conflicts[0].participantUserId").value(user.id()));
+
+        mockMvc.perform(patch("/api/events/{eventId}", secondEventId)
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "startTime": "2026-05-30T10:15:00+08:00",
+                                  "endTime": "2026-05-30T10:45:00+08:00",
+                                  "forceUpdateOnConflict": true
+                                }
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.data.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.data.conflicts[0].participantUserId").value(user.id()));
+    }
+
+    @Test
+    void conflictCheckEndpointReturnsParticipantConflicts() throws Exception {
+        RegisteredUser user = register("event_conflict_check", "event-conflict-check@example.com", "Conflict Check");
+        MvcResult created = createEvent(user, """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "待检测会议",
+                  "startTime": "2026-05-30T14:00:00+08:00",
+                  "endTime": "2026-05-30T15:00:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(user.personalSpaceId(), user.id()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long eventId = data(created).path("id").asLong();
+
+        mockMvc.perform(post("/api/events/conflicts/check")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "participantUserIds": [%d],
+                                  "startTime": "2026-05-30T14:30:00+08:00",
+                                  "endTime": "2026-05-30T15:30:00+08:00"
+                                }
+                                """.formatted(user.personalSpaceId(), user.id())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.hasConflict").value(true))
+                .andExpect(jsonPath("$.data.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.data.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.data.conflicts[0].title").value("已有安排"))
+                .andExpect(jsonPath("$.data.conflicts[0].participantUserId").value(user.id()));
+    }
+
+    @Test
+    void organizationEventDetectsMemberPersonalEventConflict() throws Exception {
+        OrganizationFixture fixture = createOrganizationFixture("event_cross_space_conflict");
+        MvcResult personal = createEvent(fixture.member(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "成员个人安排",
+                  "startTime": "2026-05-30T16:00:00+08:00",
+                  "endTime": "2026-05-30T17:00:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(fixture.member().personalSpaceId(), fixture.member().id()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long personalEventId = data(personal).path("id").asLong();
+
+        mockMvc.perform(post("/api/events/conflicts/check")
+                        .header("Authorization", "Bearer " + fixture.owner().token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "participantUserIds": [%d],
+                                  "startTime": "2026-05-30T16:30:00+08:00",
+                                  "endTime": "2026-05-30T17:30:00+08:00"
+                                }
+                """.formatted(fixture.spaceId(), fixture.member().id())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.hasConflict").value(true))
+                .andExpect(jsonPath("$.data.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.data.conflicts[0].participantUserId").value(fixture.member().id()));
+
+        createEvent(fixture.owner(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "企业冲突会议",
+                  "startTime": "2026-05-30T16:30:00+08:00",
+                  "endTime": "2026-05-30T17:30:00+08:00",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(fixture.spaceId(), fixture.member().id()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.details.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.error.details.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.error.details.conflicts[0].participantUserId").value(fixture.member().id()));
+
+        createEvent(fixture.owner(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "企业冲突会议",
+                  "startTime": "2026-05-30T16:30:00+08:00",
+                  "endTime": "2026-05-30T17:30:00+08:00",
+                  "participantUserIds": [%d],
+                  "forceCreateOnConflict": true
+                }
+                """.formatted(fixture.spaceId(), fixture.member().id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.requiresConfirmation").value(true))
+                .andExpect(jsonPath("$.data.conflicts[0].eventId").value(0))
+                .andExpect(jsonPath("$.data.conflicts[0].participantUserId").value(fixture.member().id()));
+    }
+
+    @Test
     void enterpriseEventRejectsParticipantOutsideOrganization() throws Exception {
         OrganizationFixture fixture = createOrganizationFixture("event_outsider");
         RegisteredUser outsider = register("event_outsider_user", "event-outsider-user@example.com", "Outsider");

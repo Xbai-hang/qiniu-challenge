@@ -10,10 +10,18 @@
       <form class="calendar-filters" aria-label="事件筛选" @submit.prevent="loadEvents">
         <div class="field compact-field">
           <span>空间</span>
-          <div :class="['readonly-space', currentSpace?.type === 'organization' ? 'is-organization' : 'is-personal']">
-            <span class="space-dot" aria-hidden="true"></span>
-            <strong>{{ currentSpace?.name || '暂无空间' }}</strong>
-          </div>
+          <select
+            v-model="selectedSpaceId"
+            name="calendarSpaceId"
+            autocomplete="off"
+            :disabled="workspace.state.isLoading || workspace.state.spaces.length === 0"
+            @change="handleSpaceSelectionChange"
+          >
+            <option :value="null">全部空间</option>
+            <option v-for="space in workspace.state.spaces" :key="space.id" :value="space.id">
+              {{ space.name }} · {{ spaceTypeLabel(space.type) }}
+            </option>
+          </select>
         </div>
 
         <label class="field compact-field">
@@ -89,7 +97,7 @@
         </label>
 
         <div class="filter-actions">
-          <button type="submit" class="primary-action" :disabled="isEventsLoading || !currentSpace">
+          <button type="submit" class="primary-action" :disabled="isEventsLoading">
             <Search />
             <span>查询</span>
           </button>
@@ -289,7 +297,12 @@
         <div v-if="isEventsLoading" class="empty-state" role="status" aria-live="polite">正在加载事件…</div>
         <div v-else-if="events.length === 0" class="empty-state">当前筛选范围内没有事件。</div>
 
-        <article v-for="event in events" v-else :key="event.id" class="event-row">
+        <article
+          v-for="event in events"
+          v-else
+          :key="event.id"
+          :class="['event-row', event.conflicts.length > 0 ? 'has-conflict' : '']"
+        >
           <div class="event-time">
             <strong>{{ formatTime(event.startTime) }}</strong>
             <span>{{ formatDate(event.startTime) }}</span>
@@ -301,6 +314,9 @@
               <span v-if="event.priority" :class="['priority-pill', `is-${event.priority}`]">
                 {{ priorityLabel(event.priority) }}
               </span>
+              <span v-if="event.conflicts.length > 0" class="conflict-pill">
+                冲突 {{ event.conflicts.length }}
+              </span>
             </div>
             <p>{{ event.description || event.notes || '无补充说明' }}</p>
             <div class="event-meta">
@@ -311,6 +327,17 @@
             </div>
             <div v-if="event.tags.length > 0" class="tag-row">
               <span v-for="tag in event.tags" :key="tag">#{{ tag }}</span>
+            </div>
+            <div v-if="event.conflicts.length > 0" class="conflict-box">
+              <strong>时间冲突</strong>
+              <ul>
+                <li
+                  v-for="conflict in event.conflicts"
+                  :key="`${event.id}-${conflict.participantUserId}-${conflict.startTime}-${conflict.endTime}`"
+                >
+                  {{ conflict.participantName }} 已有安排，{{ formatTimeRange(conflict.startTime, conflict.endTime) }}
+                </li>
+              </ul>
             </div>
           </div>
 
@@ -339,12 +366,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  ApiClientError,
+  checkEventConflicts,
   createCalendarEvent,
   deleteCalendarEvent,
   getCalendarEvents,
   getOrganizationMembers,
   updateCalendarEvent,
   type CalendarEvent,
+  type EventConflict,
+  type EventPayload,
   type OrganizationMember,
 } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -377,6 +408,11 @@ type EventFormState = {
   notes: string
 }
 
+type ConflictErrorDetails = {
+  requiresConfirmation?: boolean
+  conflicts?: EventConflict[]
+}
+
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -385,6 +421,7 @@ const workspace = useWorkspaceStore()
 const organizationMembers = ref<OrganizationMember[]>([])
 const events = ref<CalendarEvent[]>([])
 const editingEvent = ref<CalendarEvent | null>(null)
+const selectedSpaceId = ref<number | null>(null)
 const isEventsLoading = ref(false)
 const isSubmitting = ref(false)
 const isSyncingRoute = ref(false)
@@ -403,7 +440,9 @@ const filters = reactive<FilterState>({
 
 const form = reactive<EventFormState>(emptyForm())
 
-const currentSpace = computed(() => workspace.currentSpace.value)
+const currentSpace = computed(
+  () => workspace.state.spaces.find((space) => space.id === selectedSpaceId.value) ?? null,
+)
 const isOrganizationSpace = computed(() => currentSpace.value?.type === 'organization')
 const selectableMembers = computed(() => {
   if (isOrganizationSpace.value) {
@@ -436,18 +475,13 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 })
 
 async function loadEvents() {
-  if (!currentSpace.value) {
-    events.value = []
-    return
-  }
-
   isEventsLoading.value = true
   syncRouteFromFilters()
 
   try {
     events.value = await getCalendarEvents(
       {
-        calendarSpaceId: currentSpace.value.id,
+        calendarSpaceId: selectedSpaceId.value ?? undefined,
         start: toApiDate(filters.start),
         end: toApiDate(filters.end),
         keyword: filters.keyword,
@@ -484,7 +518,7 @@ async function submitEvent() {
 
   isSubmitting.value = true
   try {
-    const payload = {
+    const payload: EventPayload = {
       calendarSpaceId: currentSpace.value.id,
       title: form.title,
       startTime: toApiDate(form.startTime),
@@ -501,17 +535,24 @@ async function submitEvent() {
         tags: parseTextList(form.tagsText),
       },
     }
-
-    if (editingEvent.value) {
-      await updateCalendarEvent(editingEvent.value.id, {
-        ...payload,
-        version: editingEvent.value.version,
-      })
-      ElMessage.success('事件已更新')
-    } else {
-      await createCalendarEvent(payload)
-      ElMessage.success('事件已创建')
+    const confirmed = await confirmConflictsIfNeeded(payload)
+    if (!confirmed) {
+      return
     }
+
+    const saved = await saveEventPayload(payload)
+    if (!saved) {
+      return
+    }
+    ElMessage.success(
+      editingEvent.value
+        ? payload.forceUpdateOnConflict
+          ? '事件已更新，已保留冲突安排'
+          : '事件已更新'
+        : payload.forceCreateOnConflict
+          ? '事件已创建，已保留冲突安排'
+          : '事件已创建',
+    )
 
     resetForm()
     await loadEvents()
@@ -520,7 +561,118 @@ async function submitEvent() {
   }
 }
 
+async function saveEventPayload(payload: EventPayload) {
+  try {
+    if (editingEvent.value) {
+      await updateCalendarEvent(
+        editingEvent.value.id,
+        {
+          ...payload,
+          version: editingEvent.value.version,
+        },
+        { showErrorMessage: false },
+      )
+    } else {
+      await createCalendarEvent(payload, { showErrorMessage: false })
+    }
+    return true
+  } catch (error) {
+    if (!isConflictConfirmationError(error)) {
+      ElMessage.error(error instanceof Error ? error.message : '事件保存失败')
+      throw error
+    }
+
+    const confirmed = await confirmConflictList(error.details.conflicts ?? [])
+    if (!confirmed) {
+      return false
+    }
+
+    if (editingEvent.value) {
+      payload.forceUpdateOnConflict = true
+      await updateCalendarEvent(
+        editingEvent.value.id,
+        {
+          ...payload,
+          version: editingEvent.value.version,
+        },
+        { showErrorMessage: false },
+      )
+    } else {
+      payload.forceCreateOnConflict = true
+      await createCalendarEvent(payload, { showErrorMessage: false })
+    }
+    return true
+  }
+}
+
+async function confirmConflictsIfNeeded(payload: EventPayload) {
+  if (!payload.calendarSpaceId || !payload.startTime || !payload.endTime) {
+    return true
+  }
+
+  const result = await checkEventConflicts({
+    calendarSpaceId: payload.calendarSpaceId,
+    eventId: editingEvent.value?.id,
+    participantUserIds: conflictParticipantUserIds(payload),
+    startTime: payload.startTime,
+    endTime: payload.endTime,
+  })
+
+  if (!result.hasConflict) {
+    return true
+  }
+
+  const confirmed = await confirmConflictList(result.conflicts)
+  if (confirmed) {
+    if (editingEvent.value) {
+      payload.forceUpdateOnConflict = true
+    } else {
+      payload.forceCreateOnConflict = true
+    }
+  }
+  return confirmed
+}
+
+async function confirmConflictList(conflicts: EventConflict[]) {
+  try {
+    await ElMessageBox.confirm(conflictSummary(conflicts), '检测到日程冲突', {
+      confirmButtonText: editingEvent.value ? '仍然保存' : '仍然创建',
+      cancelButtonText: '返回修改',
+      type: 'warning',
+      dangerouslyUseHTMLString: true,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isConflictConfirmationError(error: unknown): error is ApiClientError & { details: ConflictErrorDetails } {
+  if (!(error instanceof ApiClientError) || error.code !== 'CONFLICT') {
+    return false
+  }
+  const details = error.details as ConflictErrorDetails | undefined
+  return Boolean(details?.requiresConfirmation && Array.isArray(details.conflicts))
+}
+
+function conflictParticipantUserIds(payload: EventPayload) {
+  const participantIds = new Set<number>()
+  if (editingEvent.value) {
+    editingEvent.value.participants
+      .filter((participant) => participant.role === 'organizer')
+      .forEach((participant) => participantIds.add(participant.userId))
+  } else if (auth.state.user?.id) {
+    participantIds.add(auth.state.user.id)
+  }
+  payload.participantUserIds?.forEach((userId) => participantIds.add(userId))
+  return [...participantIds]
+}
+
 function editEvent(event: CalendarEvent) {
+  if (selectedSpaceId.value !== event.calendarSpaceId) {
+    selectedSpaceId.value = event.calendarSpaceId
+    void loadMembers()
+  }
   editingEvent.value = event
   form.title = event.title
   form.startTime = toLocalInputValue(event.startTime)
@@ -684,6 +836,36 @@ function formatTimeRange(start: string, end: string) {
   return `${formatTime(start)} - ${formatTime(end)}`
 }
 
+function conflictSummary(conflicts: EventConflict[]) {
+  const items = conflicts
+    .slice(0, 6)
+    .map((conflict) => `
+      <li>
+        <strong>${escapeHtml(conflict.participantName)} 已有安排</strong>
+        <em>${escapeHtml(formatDate(conflict.startTime))} ${escapeHtml(formatTimeRange(conflict.startTime, conflict.endTime))}</em>
+      </li>
+    `)
+    .join('')
+  const more = conflicts.length > 6 ? `<p>另有 ${conflicts.length - 6} 个冲突未展示。</p>` : ''
+
+  return `
+    <div class="conflict-confirm">
+      <p>该时间段已有日程安排。继续操作会保留冲突，请确认是否继续。</p>
+      <ul>${items}</ul>
+      ${more}
+    </div>
+  `
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     todo: '待处理',
@@ -703,18 +885,19 @@ function priorityLabel(priority: string) {
   return labels[priority] ?? priority
 }
 
+function spaceTypeLabel(type: string) {
+  return type === 'organization' ? '组织' : '个人'
+}
+
 function memberLabel(member: OrganizationMember) {
   return member.nickname || member.displayName || `用户 ${member.userId}`
 }
 
-watch(
-  () => workspace.state.selectedSpaceId,
-  async () => {
-    await loadMembers()
-    resetForm()
-    await loadEvents()
-  },
-)
+async function handleSpaceSelectionChange() {
+  await loadMembers()
+  resetForm()
+  await loadEvents()
+}
 
 watch(
   () => route.query,

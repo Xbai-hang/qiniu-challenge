@@ -16,6 +16,13 @@ public interface EventRepository {
 
     List<CalendarEvent> findEvents(EventSearchRequest request, long currentUserId);
 
+    List<EventConflict> findConflicts(
+            long currentUserId,
+            List<Long> participantUserIds,
+            OffsetDateTime start,
+            OffsetDateTime end,
+            Long excludeEventId);
+
     boolean updateEvent(CalendarEvent event, int expectedVersion);
 
     boolean softDeleteEvent(long eventId);

@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { QueryParams } from './types'
+import type { QueryParams, RequestOptions } from './types'
 
 export type EventParticipant = {
   userId: number
@@ -46,6 +46,33 @@ export type CalendarEvent = {
   customFields?: string | null
   version: number
   participants: EventParticipant[]
+  conflicts: EventConflict[]
+  requiresConfirmation: boolean
+}
+
+export type EventConflict = {
+  eventId: number
+  calendarSpaceId?: number
+  calendarSpaceName?: string
+  title: string
+  participantUserId: number
+  participantName: string
+  startTime: string
+  endTime: string
+}
+
+export type ConflictCheckPayload = {
+  calendarSpaceId: number
+  eventId?: number
+  participantUserIds?: number[]
+  startTime: string
+  endTime: string
+}
+
+export type ConflictCheckResult = {
+  hasConflict: boolean
+  conflicts: EventConflict[]
+  requiresConfirmation: boolean
 }
 
 export type EventPayload = {
@@ -66,6 +93,8 @@ export type EventPayload = {
   notes?: string
   version?: number
   participantUserIds?: number[]
+  forceCreateOnConflict?: boolean
+  forceUpdateOnConflict?: boolean
   enterpriseFields?: EventEnterpriseFields
 }
 
@@ -84,10 +113,11 @@ export type EventListParams = {
   sortDirection?: 'asc' | 'desc'
 }
 
-export function createCalendarEvent(payload: EventPayload) {
+export function createCalendarEvent(payload: EventPayload, options: Pick<RequestOptions, 'showErrorMessage'> = {}) {
   return request<CalendarEvent>('/events', {
     method: 'POST',
     body: payload,
+    showErrorMessage: options.showErrorMessage,
   })
 }
 
@@ -104,16 +134,28 @@ export function getCalendarEvent(eventId: number, options: { showErrorMessage?: 
   })
 }
 
-export function updateCalendarEvent(eventId: number, payload: EventPayload) {
+export function updateCalendarEvent(
+  eventId: number,
+  payload: EventPayload,
+  options: Pick<RequestOptions, 'showErrorMessage'> = {},
+) {
   return request<CalendarEvent>(`/events/${eventId}`, {
     method: 'PATCH',
     body: payload,
+    showErrorMessage: options.showErrorMessage,
   })
 }
 
 export function deleteCalendarEvent(eventId: number) {
   return request<boolean>(`/events/${eventId}`, {
     method: 'DELETE',
+  })
+}
+
+export function checkEventConflicts(payload: ConflictCheckPayload) {
+  return request<ConflictCheckResult>('/events/conflicts/check', {
+    method: 'POST',
+    body: payload,
   })
 }
 
