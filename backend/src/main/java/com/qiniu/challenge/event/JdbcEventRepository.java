@@ -395,6 +395,19 @@ public class JdbcEventRepository implements EventRepository {
     }
 
     @Override
+    public boolean restoreDeletedEvent(long eventId) {
+        int updated = jdbcTemplate.update("""
+                UPDATE calendar_events
+                SET deleted_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE id = ?
+                  AND deleted_at IS NOT NULL
+                """, eventId);
+        return updated > 0;
+    }
+
+    @Override
     public List<EventParticipant> findParticipants(long eventId) {
         return jdbcTemplate.query("""
                 SELECT

@@ -110,7 +110,7 @@ public class AiToolConfiguration {
         return new RegisteredTool(definition, (context, arguments) -> ToolExecutionResult.succeeded(
                 definition.name(),
                 definition.baseRiskLevel(),
-                eventService.deleteEvent(context.userId(), requireLong(arguments, "eventId"))));
+                deleteResult(eventService, context.userId(), requireLong(arguments, "eventId"))));
     }
 
     @Bean
@@ -233,5 +233,12 @@ public class AiToolConfiguration {
     private static OffsetDateTime offsetDateTime(Object value) {
         String stringValue = stringValue(value);
         return stringValue == null ? null : OffsetDateTime.parse(stringValue);
+    }
+
+    private static Map<String, Object> deleteResult(EventService eventService, long userId, long eventId) {
+        boolean deleted = eventService.deleteEvent(userId, eventId);
+        return Map.of(
+                "eventId", eventId,
+                "deleted", deleted);
     }
 }

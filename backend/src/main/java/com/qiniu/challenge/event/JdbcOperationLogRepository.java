@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -59,25 +60,31 @@ public class JdbcOperationLogRepository implements OperationLogRepository {
                     INSERT INTO operation_logs (
                       user_id,
                       calendar_space_id,
+                      conversation_id,
+                      tool_call_id,
                       operation_source,
                       operation_type,
                       target_type,
                       target_id,
                       before_snapshot,
                       after_snapshot,
-                      undoable
+                      undoable,
+                      undo_expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, new String[]{"id"});
             statement.setLong(1, entry.userId());
             statement.setLong(2, entry.calendarSpaceId());
-            statement.setString(3, entry.operationSource());
-            statement.setString(4, entry.operationType());
-            statement.setString(5, entry.targetType());
-            setNullableLong(statement, 6, entry.targetId());
-            statement.setString(7, toJson(entry.beforeSnapshot()));
-            statement.setString(8, toJson(entry.afterSnapshot()));
-            statement.setBoolean(9, entry.undoable());
+            setNullableLong(statement, 3, entry.conversationId());
+            setNullableLong(statement, 4, entry.toolCallId());
+            statement.setString(5, entry.operationSource());
+            statement.setString(6, entry.operationType());
+            statement.setString(7, entry.targetType());
+            setNullableLong(statement, 8, entry.targetId());
+            statement.setString(9, toJson(entry.beforeSnapshot()));
+            statement.setString(10, toJson(entry.afterSnapshot()));
+            statement.setBoolean(11, entry.undoable());
+            statement.setTimestamp(12, toTimestamp(entry.undoExpiresAt()));
             return statement;
         }, keyHolder);
         Number key = keyHolder.getKey();
@@ -175,6 +182,48 @@ public class JdbcOperationLogRepository implements OperationLogRepository {
                 """, logRowMapper, params.toArray());
     }
 
+    @Override
+    public Optional<OperationLogRecord> findLastUndoableAiOperation(long userId, long calendarSpaceId) {
+        return jdbcTemplate.query("""
+                SELECT
+                  l.id,
+                  l.user_id,
+                  u.display_name AS user_display_name,
+                  l.calendar_space_id,
+                  s.name AS calendar_space_name,
+                  l.operation_source,
+                  l.operation_type,
+                  l.target_type,
+                  l.target_id,
+                  l.before_snapshot,
+                  l.after_snapshot,
+                  l.undoable,
+                  l.undone,
+                  l.undo_expires_at,
+                  l.created_at
+                FROM operation_logs l
+                JOIN users u ON u.id = l.user_id
+                JOIN calendar_spaces s ON s.id = l.calendar_space_id
+                WHERE l.user_id = ?
+                  AND l.calendar_space_id = ?
+                  AND l.operation_source = 'ai'
+                  AND l.undoable = TRUE
+                  AND l.undone = FALSE
+                  AND l.undo_expires_at > CURRENT_TIMESTAMP
+                ORDER BY l.created_at DESC, l.id DESC
+                LIMIT 1
+                """, logRowMapper, userId, calendarSpaceId).stream().findFirst();
+    }
+
+    @Override
+    public void markUndone(long operationId) {
+        jdbcTemplate.update("""
+                UPDATE operation_logs
+                SET undone = TRUE
+                WHERE id = ?
+                """, operationId);
+    }
+
     private String whereClause(OperationLogQuery query, List<Object> params) {
         StringBuilder sql = new StringBuilder("""
                 WHERE u.deleted_at IS NULL
@@ -230,6 +279,13 @@ public class JdbcOperationLogRepository implements OperationLogRepository {
             return null;
         }
         return timestamp.toLocalDateTime().atZone(DEFAULT_ZONE).toOffsetDateTime();
+    }
+
+    private static Timestamp toTimestamp(OffsetDateTime value) {
+        if (value == null) {
+            return null;
+        }
+        return Timestamp.valueOf(value.atZoneSameInstant(DEFAULT_ZONE).toLocalDateTime());
     }
 
     private static Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {

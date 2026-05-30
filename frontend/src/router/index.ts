@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import CalendarView from '../views/CalendarView.vue'
+import AiChatView from '../views/AiChatView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
 import NotificationsView from '../views/NotificationsView.vue'
@@ -15,7 +16,7 @@ const router = createRouter({
       name: 'dashboard',
       component: DashboardView,
       meta: {
-        title: 'AI 工作台',
+        title: '首页',
       },
     },
     {
@@ -33,6 +34,14 @@ const router = createRouter({
       component: CalendarView,
       meta: {
         title: '日历',
+      },
+    },
+    {
+      path: '/ai-chat',
+      name: 'ai-chat',
+      component: AiChatView,
+      meta: {
+        title: 'AI 对话',
       },
     },
     {

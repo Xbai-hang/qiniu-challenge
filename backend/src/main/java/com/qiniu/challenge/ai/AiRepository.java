@@ -25,4 +25,16 @@ public interface AiRepository {
             Long calendarSpaceId,
             int page,
             int size);
+
+    long createTaskState(CreateAiTaskStateCommand command);
+
+    List<AiTaskStateResponse> findOpenTaskStates(long userId, long conversationId);
+
+    long createPendingConfirmation(CreatePendingConfirmationCommand command);
+
+    Optional<PendingConfirmationResponse> findPendingConfirmation(long confirmationId, long userId);
+
+    List<PendingConfirmationResponse> findPendingConfirmations(long userId);
+
+    void markConfirmation(long confirmationId, String status);
 }
