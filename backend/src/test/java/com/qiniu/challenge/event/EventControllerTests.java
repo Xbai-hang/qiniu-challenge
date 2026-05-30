@@ -159,6 +159,43 @@ class EventControllerTests {
                 .andExpect(jsonPath("$.data.participants.length()").value(2))
                 .andExpect(jsonPath("$.data.participants[0].userId").value(fixture.owner().id()))
                 .andExpect(jsonPath("$.data.participants[1].userId").value(fixture.admin().id()));
+
+        mockMvc.perform(get("/api/notifications")
+                        .header("Authorization", "Bearer " + fixture.admin().token())
+                        .param("status", "unread"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.unreadCount").value(1))
+                .andExpect(jsonPath("$.data.items[0].type").value("event_invite"))
+                .andExpect(jsonPath("$.data.items[0].title")
+                        .value(org.hamcrest.Matchers.containsString("项目同步更新")));
+    }
+
+    @Test
+    void creatingOrganizationEventNotifiesAddedParticipants() throws Exception {
+        OrganizationFixture fixture = createOrganizationFixture("event_invite_create");
+
+        createEvent(fixture.owner(), """
+                {
+                  "calendarSpaceId": %d,
+                  "title": "企业评审会",
+                  "startTime": "2026-05-30T10:00:00+08:00",
+                  "endTime": "2026-05-30T11:00:00+08:00",
+                  "location": "会议室 B",
+                  "participantUserIds": [%d]
+                }
+                """.formatted(fixture.spaceId(), fixture.member().id()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/notifications")
+                        .header("Authorization", "Bearer " + fixture.member().token())
+                        .param("status", "unread"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].type").value("event_invite"))
+                .andExpect(jsonPath("$.data.items[0].reminderId").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].title").value("你被添加到日程「企业评审会」"))
+                .andExpect(jsonPath("$.data.items[0].content")
+                        .value(org.hamcrest.Matchers.containsString("会议室 B")));
     }
 
     @Test

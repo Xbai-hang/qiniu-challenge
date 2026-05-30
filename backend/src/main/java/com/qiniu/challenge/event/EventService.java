@@ -2,6 +2,11 @@ package com.qiniu.challenge.event;
 
 import com.qiniu.challenge.common.ApiException;
 import com.qiniu.challenge.common.ErrorCode;
+import com.qiniu.challenge.reminder.CreateNotificationCommand;
+import com.qiniu.challenge.reminder.NotificationRecord;
+import com.qiniu.challenge.reminder.NotificationResponse;
+import com.qiniu.challenge.reminder.NotificationWebSocketHandler;
+import com.qiniu.challenge.reminder.ReminderRepository;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,22 +29,30 @@ public class EventService {
     private static final String NEEDS_ACTION = "needs_action";
     private static final String ACCEPTED = "accepted";
     private static final String MANUAL_SOURCE = "manual";
+    private static final String SYSTEM_SOURCE = "system";
     private static final String EVENT_TARGET = "event";
+    private static final String NOTIFICATION_TARGET = "notification";
 
     private final EventRepository eventRepository;
     private final PermissionService permissionService;
     private final ConflictService conflictService;
     private final OperationLogRepository operationLogRepository;
+    private final ReminderRepository reminderRepository;
+    private final NotificationWebSocketHandler notificationWebSocketHandler;
 
     public EventService(
             EventRepository eventRepository,
             PermissionService permissionService,
             ConflictService conflictService,
-            OperationLogRepository operationLogRepository) {
+            OperationLogRepository operationLogRepository,
+            ReminderRepository reminderRepository,
+            NotificationWebSocketHandler notificationWebSocketHandler) {
         this.eventRepository = eventRepository;
         this.permissionService = permissionService;
         this.conflictService = conflictService;
         this.operationLogRepository = operationLogRepository;
+        this.reminderRepository = reminderRepository;
+        this.notificationWebSocketHandler = notificationWebSocketHandler;
     }
 
     @Transactional
@@ -104,6 +117,10 @@ public class EventService {
                 null,
                 created,
                 false));
+        notifyAddedParticipants(currentUserId, space, created, notifiedUserIds(
+                participantsToUserIds(participants),
+                ownerUserId,
+                currentUserId));
         return snapshot(eventId, conflicts);
     }
 
@@ -183,13 +200,17 @@ public class EventService {
                 ? existing.ownerUserId()
                 : fields.ownerUserId();
         List<Long> requestedParticipants = request.participantUserIds();
+        Set<Long> existingParticipantIds = eventRepository.findParticipants(eventId).stream()
+                .map(EventParticipant::userId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Long existingOwnerUserId = existing.ownerUserId();
         validateEnterpriseUsers(space, currentUserId, requestedParticipants, ownerUserId);
         List<ParticipantCommand> finalParticipants = requestedParticipants == null
-                ? eventRepository.findParticipants(eventId).stream()
+                ? existingParticipantIds.stream()
                         .map(participant -> new ParticipantCommand(
-                                participant.userId(),
-                                participant.role(),
-                                participant.responseStatus()))
+                                participant,
+                                participant == existing.createdBy() ? ORGANIZER : ATTENDEE,
+                                participant == existing.createdBy() ? ACCEPTED : NEEDS_ACTION))
                         .toList()
                 : buildParticipants(existing.createdBy(), requestedParticipants);
         List<EventConflict> conflicts = conflictService.detectConflicts(
@@ -246,6 +267,21 @@ public class EventService {
                 beforeSnapshot,
                 afterSnapshot,
                 false));
+        if (requestedParticipants != null) {
+            List<Long> addedParticipantIds = finalParticipants.stream()
+                    .map(ParticipantCommand::userId)
+                    .filter(userId -> !existingParticipantIds.contains(userId))
+                    .toList();
+            notifyAddedParticipants(currentUserId, space, afterSnapshot, notifiedUserIds(
+                    addedParticipantIds,
+                    newlyAssignedOwnerUserId(existingOwnerUserId, ownerUserId),
+                    currentUserId));
+        } else if (newlyAssignedOwnerUserId(existingOwnerUserId, ownerUserId) != null) {
+            notifyAddedParticipants(currentUserId, space, afterSnapshot, notifiedUserIds(
+                    List.of(),
+                    ownerUserId,
+                    currentUserId));
+        }
         return snapshot(eventId, conflicts);
     }
 
@@ -368,6 +404,83 @@ public class EventService {
                         userId == organizerUserId ? ORGANIZER : ATTENDEE,
                         userId == organizerUserId ? ACCEPTED : NEEDS_ACTION))
                 .toList();
+    }
+
+    private List<Long> participantsToUserIds(List<ParticipantCommand> participants) {
+        return participants.stream()
+                .map(ParticipantCommand::userId)
+                .toList();
+    }
+
+    private List<Long> notifiedUserIds(List<Long> participantUserIds, Long ownerUserId, long currentUserId) {
+        LinkedHashSet<Long> userIds = new LinkedHashSet<>();
+        if (participantUserIds != null) {
+            userIds.addAll(participantUserIds);
+        }
+        if (ownerUserId != null) {
+            userIds.add(ownerUserId);
+        }
+        userIds.remove(currentUserId);
+        return userIds.stream().toList();
+    }
+
+    private Long newlyAssignedOwnerUserId(Long existingOwnerUserId, Long ownerUserId) {
+        if (ownerUserId == null || ownerUserId.equals(existingOwnerUserId)) {
+            return null;
+        }
+        return ownerUserId;
+    }
+
+    private void notifyAddedParticipants(
+            long actorUserId,
+            CalendarSpaceAccess space,
+            EventResponse event,
+            List<Long> participantUserIds) {
+        if (participantUserIds == null || participantUserIds.isEmpty()) {
+            return;
+        }
+        for (Long participantUserId : participantUserIds) {
+            long notificationId = reminderRepository.createNotification(new CreateNotificationCommand(
+                    participantUserId,
+                    event.calendarSpaceId(),
+                    null,
+                    "event_invite",
+                    "你被添加到日程「" + event.title() + "」",
+                    eventSummary(space, event),
+                    eventInvitePayload(actorUserId, event)));
+            NotificationRecord notification = reminderRepository
+                    .findNotification(notificationId, participantUserId)
+                    .orElse(null);
+            if (notification == null) {
+                continue;
+            }
+            NotificationResponse response = NotificationResponse.of(notification);
+            if (notificationWebSocketHandler.push(response)) {
+                reminderRepository.markNotificationPushed(notificationId, reminderRepository.now());
+            }
+            operationLogRepository.create(new OperationLogEntry(
+                    participantUserId,
+                    event.calendarSpaceId(),
+                    SYSTEM_SOURCE,
+                    "create",
+                    NOTIFICATION_TARGET,
+                    notificationId,
+                    null,
+                    response,
+                    false));
+        }
+    }
+
+    private String eventSummary(CalendarSpaceAccess space, EventResponse event) {
+        return "空间：" + space.name()
+                + "；时间：" + event.startTime() + " - " + event.endTime()
+                + (event.location() == null ? "" : "；地点：" + event.location());
+    }
+
+    private String eventInvitePayload(long actorUserId, EventResponse event) {
+        return """
+                {"eventId":%d,"actorUserId":%d,"startTime":"%s","endTime":"%s"}
+                """.formatted(event.id(), actorUserId, event.startTime(), event.endTime()).trim();
     }
 
     private void validateTimeRange(OffsetDateTime startTime, OffsetDateTime endTime) {

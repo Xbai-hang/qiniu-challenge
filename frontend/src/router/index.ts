@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import CalendarView from '../views/CalendarView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
+import NotificationsView from '../views/NotificationsView.vue'
 import OperationLogsView from '../views/OperationLogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import { useAuthStore } from '../stores/auth'
@@ -40,6 +41,14 @@ const router = createRouter({
       component: OperationLogsView,
       meta: {
         title: '操作日志记录',
+      },
+    },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: NotificationsView,
+      meta: {
+        title: '提醒中心',
       },
     },
     {

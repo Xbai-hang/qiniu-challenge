@@ -1,5 +1,7 @@
 DROP TABLE IF EXISTS event_participants;
 DROP TABLE IF EXISTS operation_logs;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS event_reminders;
 DROP TABLE IF EXISTS calendar_events;
 DROP TABLE IF EXISTS calendar_spaces;
 DROP TABLE IF EXISTS organization_members;
@@ -148,3 +150,48 @@ CREATE INDEX idx_operation_user_time ON operation_logs (user_id, created_at);
 CREATE INDEX idx_operation_space_time ON operation_logs (calendar_space_id, created_at);
 CREATE INDEX idx_operation_undo ON operation_logs (user_id, operation_source, undoable, undone, undo_expires_at);
 CREATE INDEX idx_operation_target ON operation_logs (target_type, target_id);
+
+CREATE TABLE event_reminders (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  event_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  offset_minutes INT NULL,
+  trigger_at TIMESTAMP(3) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  snoozed_from_id BIGINT NULL,
+  created_by BIGINT NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  cancelled_at TIMESTAMP(3) NULL,
+  CONSTRAINT fk_reminders_event FOREIGN KEY (event_id) REFERENCES calendar_events (id),
+  CONSTRAINT fk_reminders_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_reminders_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_reminders_created_by FOREIGN KEY (created_by) REFERENCES users (id),
+  CONSTRAINT fk_reminders_snoozed_from FOREIGN KEY (snoozed_from_id) REFERENCES event_reminders (id)
+);
+
+CREATE INDEX idx_reminders_trigger ON event_reminders (status, trigger_at);
+CREATE INDEX idx_reminders_user_status ON event_reminders (user_id, status);
+CREATE INDEX idx_reminders_event ON event_reminders (event_id);
+
+CREATE TABLE notifications (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  reminder_id BIGINT NULL,
+  type VARCHAR(64) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  content CLOB NULL,
+  payload CLOB NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'unread',
+  pushed_at TIMESTAMP(3) NULL,
+  read_at TIMESTAMP(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_notifications_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_notifications_reminder FOREIGN KEY (reminder_id) REFERENCES event_reminders (id)
+);
+
+CREATE INDEX idx_notifications_user_status ON notifications (user_id, status, created_at);
+CREATE INDEX idx_notifications_reminder ON notifications (reminder_id);
