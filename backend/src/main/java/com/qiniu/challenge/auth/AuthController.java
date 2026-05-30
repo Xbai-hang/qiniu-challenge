@@ -21,4 +21,14 @@ public class AuthController {
     public ApiResponse<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ApiResponse.success(authService.register(request));
     }
+
+    @PostMapping("/login")
+    public ApiResponse<AuthTokenResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ApiResponse.success(authService.login(request));
+    }
+
+    @PostMapping("/logout")
+    public ApiResponse<Boolean> logout() {
+        return ApiResponse.success(true);
+    }
 }

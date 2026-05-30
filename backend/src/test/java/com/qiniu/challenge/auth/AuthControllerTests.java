@@ -3,10 +3,13 @@ package com.qiniu.challenge.auth;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -14,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -24,6 +28,9 @@ class AuthControllerTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void registerCreatesUserWithEncryptedPassword() throws Exception {
@@ -43,6 +50,7 @@ class AuthControllerTests {
                 .andExpect(jsonPath("$.data.user.username").value("alice"))
                 .andExpect(jsonPath("$.data.user.email").value("alice@example.com"))
                 .andExpect(jsonPath("$.data.user.displayName").value("Alice"))
+                .andExpect(jsonPath("$.data.accessToken", notNullValue()))
                 .andExpect(jsonPath("$.data.user.passwordHash").doesNotExist())
                 .andExpect(jsonPath("$.requestId", notNullValue()));
 
@@ -93,8 +101,66 @@ class AuthControllerTests {
                 .andExpect(jsonPath("$.error.details.fields[0].field").value("password"));
     }
 
-    private void register(String username, String email) throws Exception {
-        mockMvc.perform(post("/api/auth/register")
+    @Test
+    void loginReturnsAccessToken() throws Exception {
+        register("diana", "diana@example.com");
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "diana",
+                                  "password": "Password123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken", notNullValue()))
+                .andExpect(jsonPath("$.data.user.username").value("diana"))
+                .andExpect(jsonPath("$.data.user.email").value("diana@example.com"));
+    }
+
+    @Test
+    void loginRejectsWrongPassword() throws Exception {
+        register("eric", "eric@example.com");
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "eric",
+                                  "password": "WrongPassword123"
+                                }
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.error.message").value("账号或密码错误"));
+    }
+
+    @Test
+    void currentUserRequiresToken() throws Exception {
+        mockMvc.perform(get("/api/users/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void currentUserReturnsUserWhenTokenIsValid() throws Exception {
+        String token = register("frank", "frank@example.com");
+
+        mockMvc.perform(get("/api/users/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.username").value("frank"))
+                .andExpect(jsonPath("$.data.email").value("frank@example.com"))
+                .andExpect(jsonPath("$.data.displayName").value("frank"));
+    }
+
+    private String register(String username, String email) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -104,6 +170,10 @@ class AuthControllerTests {
                                   "password": "Password123"
                                 }
                                 """.formatted(username, email, username)))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
+        return response.path("data").path("accessToken").asText();
     }
 }

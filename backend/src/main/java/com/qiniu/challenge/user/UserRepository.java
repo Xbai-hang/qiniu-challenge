@@ -11,4 +11,6 @@ public interface UserRepository {
     User save(CreateUserCommand command);
 
     Optional<User> findById(long id);
+
+    Optional<User> findByUsernameOrEmail(String account);
 }

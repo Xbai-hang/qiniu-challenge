@@ -13,3 +13,6 @@ spring:
 app:
   version: 0.1.0
   timezone: Asia/Shanghai
+  security:
+    jwt-secret: test-secret-with-enough-length
+    access-token-ttl-seconds: 86400

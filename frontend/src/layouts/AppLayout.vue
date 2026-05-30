@@ -1,5 +1,9 @@
 <template>
-  <div class="app-shell">
+  <RouterView v-if="isPublicRoute" v-slot="{ Component, route }">
+    <component :is="Component" :key="route.fullPath" />
+  </RouterView>
+
+  <div v-else class="app-shell">
     <header class="top-bar">
       <RouterLink class="brand" to="/" aria-label="返回 AI 工作台">
         <span class="brand-mark" aria-hidden="true">AI</span>
@@ -21,6 +25,11 @@
         <button type="button" class="icon-button" aria-label="通知">
           <Bell />
         </button>
+        <button type="button" class="user-button" :disabled="auth.state.isLoading" @click="handleLogout">
+          <span class="user-avatar" aria-hidden="true">{{ userInitial }}</span>
+          <span class="user-name">{{ auth.state.user?.displayName || auth.state.user?.username }}</span>
+          <SwitchButton />
+        </button>
       </nav>
     </header>
 
@@ -41,7 +50,20 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, Calendar, MagicStick, Search, Setting } from '@element-plus/icons-vue'
+import { Bell, Calendar, MagicStick, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+
+const isPublicRoute = computed(() => Boolean(route.meta.public))
+const userInitial = computed(() => {
+  const name = auth.state.user?.displayName || auth.state.user?.username || 'U'
+  return name.slice(0, 1).toUpperCase()
+})
 
 const navigationItems = [
   {
@@ -60,4 +82,9 @@ const navigationItems = [
     icon: Setting,
   },
 ]
+
+async function handleLogout() {
+  await auth.signOut()
+  await router.push({ name: 'login' })
+}
 </script>

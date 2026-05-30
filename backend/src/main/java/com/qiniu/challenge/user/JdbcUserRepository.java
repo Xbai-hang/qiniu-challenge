@@ -80,6 +80,20 @@ public class JdbcUserRepository implements UserRepository {
                 id).stream().findFirst();
     }
 
+    @Override
+    public Optional<User> findByUsernameOrEmail(String account) {
+        return jdbcTemplate.query(
+                """
+                        SELECT * FROM users
+                        WHERE deleted_at IS NULL
+                          AND status = 'active'
+                          AND (username = ? OR email = ?)
+                        """,
+                userRowMapper,
+                account,
+                account).stream().findFirst();
+    }
+
     private UserStatus toStatus(String status) {
         if (status == null) {
             return UserStatus.DISABLED;

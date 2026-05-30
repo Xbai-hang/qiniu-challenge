@@ -14,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,6 +30,7 @@ class GlobalExceptionHandlerTests {
     private MockMvc mockMvc;
 
     @Test
+    @WithMockUser
     void returnsUnifiedNotFoundResponse() throws Exception {
         mockMvc.perform(get("/api/missing"))
                 .andExpect(status().isNotFound())
@@ -40,6 +42,7 @@ class GlobalExceptionHandlerTests {
     }
 
     @Test
+    @WithMockUser
     void returnsUnifiedBusinessErrorResponse() throws Exception {
         mockMvc.perform(post("/api/test-errors/conflict"))
                 .andExpect(status().isConflict())
@@ -51,6 +54,7 @@ class GlobalExceptionHandlerTests {
     }
 
     @Test
+    @WithMockUser
     void returnsUnifiedValidationErrorResponse() throws Exception {
         mockMvc.perform(post("/api/test-errors/validation")
                         .contentType(MediaType.APPLICATION_JSON)

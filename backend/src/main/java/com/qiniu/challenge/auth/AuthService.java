@@ -17,10 +17,12 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
-    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
     }
 
     @Transactional
@@ -38,10 +40,26 @@ public class AuthService {
                     email,
                     displayName,
                     passwordEncoder.encode(request.password())));
-            return new RegisterResponse(toResponse(user), null, null);
+            return new RegisterResponse(toResponse(user), jwtService.generateAccessToken(user), null);
         } catch (DuplicateKeyException exception) {
             throw new ApiException(ErrorCode.CONFLICT, "用户名或邮箱已被注册");
         }
+    }
+
+    public AuthTokenResponse login(LoginRequest request) {
+        String account = request.account().trim();
+        User user = userRepository.findByUsernameOrEmail(account)
+                .orElseThrow(this::badCredentials);
+
+        if (!passwordEncoder.matches(request.password(), user.passwordHash())) {
+            throw badCredentials();
+        }
+
+        return new AuthTokenResponse(jwtService.generateAccessToken(user), toResponse(user));
+    }
+
+    public AuthUserResponse toCurrentUserResponse(User user) {
+        return toResponse(user);
     }
 
     private void ensureUniqueUsername(String username) {
@@ -68,5 +86,9 @@ public class AuthService {
                 user.username(),
                 user.email(),
                 user.displayName());
+    }
+
+    private ApiException badCredentials() {
+        return new ApiException(ErrorCode.UNAUTHORIZED, "账号或密码错误");
     }
 }
