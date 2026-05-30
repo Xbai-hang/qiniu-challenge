@@ -16,23 +16,24 @@
       <div :class="['space-switcher', currentSpace?.type === 'organization' ? 'is-organization' : 'is-personal']">
         <span class="space-dot" aria-hidden="true"></span>
         <select
-          v-model.number="selectedSpaceId"
+          :value="workspace.state.selectedSpaceId ?? ''"
           class="space-select"
-          :disabled="isSpacesLoading || spaces.length === 0"
+          :disabled="workspace.state.isLoading || workspace.state.spaces.length === 0"
           aria-label="当前日历空间"
+          @change="handleSpaceChange"
         >
-          <option v-if="isSpacesLoading" :value="null">加载空间中</option>
-          <option v-else-if="spaces.length === 0" :value="null">
-            {{ spacesError || '暂无可用空间' }}
+          <option v-if="workspace.state.isLoading" value="">加载空间中</option>
+          <option v-else-if="workspace.state.spaces.length === 0" value="">
+            {{ workspace.state.error || '暂无可用空间' }}
           </option>
-          <option v-for="space in spaces" :key="space.id" :value="space.id">
+          <option v-for="space in workspace.state.spaces" :key="space.id" :value="space.id">
             {{ space.name }} · {{ spaceRoleLabel(space.role) }}
           </option>
         </select>
         <button
           type="button"
           class="space-refresh-button"
-          :disabled="isSpacesLoading || isPublicRoute"
+          :disabled="workspace.state.isLoading || isPublicRoute"
           aria-label="刷新空间列表"
           @click="loadSpaces"
         >
@@ -66,30 +67,28 @@
     </aside>
 
     <RouterView v-slot="{ Component, route }">
-      <component :is="Component" :key="route.fullPath" />
+      <component :is="Component" :key="String(route.name ?? route.path)" />
     </RouterView>
   </div>
 </template>
 
 <script setup lang="ts">
 import { Bell, Calendar, MagicStick, Refresh, Search, Setting, SwitchButton } from '@element-plus/icons-vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getCalendarSpaces, type CalendarSpace } from '../api'
+import type { CalendarSpace } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { useWorkspaceStore } from '../stores/workspace'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const workspace = useWorkspaceStore()
 
 const isPublicRoute = computed(() => Boolean(route.meta.public))
-const spaces = ref<CalendarSpace[]>([])
-const selectedSpaceId = ref<number | null>(null)
-const isSpacesLoading = ref(false)
-const spacesError = ref('')
 const WORKSPACE_UPDATED_EVENT = 'organization-workspace-updated'
 
-const currentSpace = computed(() => spaces.value.find((space) => space.id === selectedSpaceId.value) ?? null)
+const currentSpace = computed(() => workspace.currentSpace.value)
 const userInitial = computed(() => {
   const name = auth.state.user?.displayName || auth.state.user?.username || 'U'
   return name.slice(0, 1).toUpperCase()
@@ -115,40 +114,17 @@ const navigationItems = [
 
 async function handleLogout() {
   await auth.signOut()
-  resetSpaces()
+  workspace.resetWorkspace()
   await router.push({ name: 'login' })
 }
 
 async function loadSpaces() {
   if (isPublicRoute.value || !auth.state.user) {
-    resetSpaces()
+    workspace.resetWorkspace()
     return
   }
 
-  isSpacesLoading.value = true
-  spacesError.value = ''
-
-  try {
-    const data = await getCalendarSpaces({ showErrorMessage: false })
-    spaces.value = data
-
-    if (!data.some((space) => space.id === selectedSpaceId.value)) {
-      selectedSpaceId.value = data[0]?.id ?? null
-    }
-  } catch (error) {
-    spaces.value = []
-    selectedSpaceId.value = null
-    spacesError.value = error instanceof Error ? error.message : '空间加载失败'
-  } finally {
-    isSpacesLoading.value = false
-  }
-}
-
-function resetSpaces() {
-  spaces.value = []
-  selectedSpaceId.value = null
-  spacesError.value = ''
-  isSpacesLoading.value = false
+  await workspace.loadSpaces({ force: true })
 }
 
 function spaceRoleLabel(role: CalendarSpace['role']) {
@@ -163,6 +139,11 @@ function spaceRoleLabel(role: CalendarSpace['role']) {
 
 function handleWorkspaceUpdated() {
   void loadSpaces()
+}
+
+function handleSpaceChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  workspace.selectSpace(value ? Number(value) : null)
 }
 
 watch(
