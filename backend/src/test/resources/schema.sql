@@ -1,0 +1,16 @@
+DROP TABLE IF EXISTS users;
+
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(64) NOT NULL,
+  email VARCHAR(128) NOT NULL,
+  display_name VARCHAR(64) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  avatar_url VARCHAR(512) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  deleted_at DATETIME(3) NULL,
+  CONSTRAINT uk_users_username UNIQUE (username),
+  CONSTRAINT uk_users_email UNIQUE (email)
+);
