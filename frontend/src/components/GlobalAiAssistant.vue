@@ -32,17 +32,20 @@
           <span>{{ ai.state.conversations.length }}</span>
         </div>
         <div v-if="ai.state.isLoadingHistory" class="global-ai-empty">正在加载历史会话</div>
-        <button
+        <div
           v-for="conversation in ai.state.conversations"
           v-else
           :key="conversation.id"
-          type="button"
           :class="['global-ai-history-item', ai.state.conversationId === conversation.id ? 'active' : '']"
-          @click="ai.selectConversation(conversation.id)"
         >
-          <strong>{{ conversation.title || 'AI 对话' }}</strong>
-          <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
-        </button>
+          <button type="button" class="ai-history-select" @click="ai.selectConversation(conversation.id)">
+            <strong>{{ conversation.title || 'AI 对话' }}</strong>
+            <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
+          </button>
+          <button type="button" class="ai-history-delete" aria-label="删除会话" @click="ai.deleteConversation(conversation.id)">
+            <Delete />
+          </button>
+        </div>
       </section>
 
       <div class="global-ai-messages">
@@ -112,7 +115,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ChatDotRound, Clock, FullScreen, Minus, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import { ChatDotRound, Clock, Delete, FullScreen, Minus, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAiAssistantSession } from '../composables/useAiAssistantSession'
 import { useWorkspaceStore } from '../stores/workspace'

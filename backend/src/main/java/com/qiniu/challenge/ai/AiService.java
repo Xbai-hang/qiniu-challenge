@@ -18,7 +18,6 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AiService {
 
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final int MAX_REACT_STEPS = 4;
     private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() {
     };
 
@@ -81,6 +81,11 @@ public class AiService {
     }
 
     @Transactional
+    public void deleteConversation(long currentUserId, long conversationId) {
+        aiRepository.deleteConversation(conversationId, currentUserId);
+    }
+
+    @Transactional
     public AiMessage addMessage(long currentUserId, long conversationId, AiMessageRequest request) {
         AiConversation conversation = requireConversation(currentUserId, conversationId);
         long messageId = createMessage(
@@ -125,9 +130,8 @@ public class AiService {
         String reply = "";
         Map<String, Object> resultCard = null;
 
-        List<AiRequestedToolCall> requestedToolCalls = List.of();
-        InferredAction inferredAction = inferAction(request.message());
-        if ("undo_last_ai_operation".equals(inferredAction.taskType())) {
+        List<AiModelMessage> reactMessages = modelMessages(currentUserId, conversation.id());
+        if (isUndoIntent(request.message())) {
             UndoLastAiOperationResponse undo = undoLast(
                     currentUserId,
                     new UndoLastAiOperationRequest(conversation.calendarSpaceId()));
@@ -151,55 +155,48 @@ public class AiService {
                     List.of(),
                     List.of());
         }
-        try {
-            AiModelResponse modelResponse = aiModelClient.chat(modelRequest(currentUserId, conversation.id(), request.message()));
-            reply = blankToNull(modelResponse.content());
-            requestedToolCalls = modelResponse.toolCalls() == null ? List.of() : modelResponse.toolCalls();
-        } catch (ApiException exception) {
-            if (exception.errorCode() != ErrorCode.AI_SERVICE_UNAVAILABLE || !"mock".equals(aiModelClient.provider())) {
-                throw exception;
-            }
-        }
+        boolean calendarToolIntent = isCalendarToolIntent(request.message());
+        AiModelResponse modelResponse = aiModelClient.chat(modelRequest(reactMessages, calendarToolIntent));
+        reply = blankToNull(modelResponse.content());
+        List<AiRequestedToolCall> requestedToolCalls = !calendarToolIntent || modelResponse.toolCalls() == null
+                ? List.of()
+                : modelResponse.toolCalls();
 
-        if (requestedToolCalls.isEmpty()) {
-            InferredAction inferred = inferredAction;
-            if (inferred.missingFields().isEmpty()) {
-                requestedToolCalls = inferred.toolCall() == null ? List.of() : List.of(inferred.toolCall());
-            } else {
-                long taskId = aiRepository.createTaskState(new CreateAiTaskStateCommand(
+        for (int step = 0; step < MAX_REACT_STEPS && !requestedToolCalls.isEmpty(); step++) {
+            List<AiRequestedToolCall> stepToolCalls = withToolCallIds(requestedToolCalls, step);
+            reactMessages.add(AiModelMessage.assistantToolCalls(stepToolCalls));
+            for (AiRequestedToolCall toolCall : stepToolCalls) {
+                ToolExecutionResult result = executeTool(currentUserId, toolCall.toolName(), new AiToolExecutionRequest(
                         conversation.id(),
-                        currentUserId,
+                        userMessageId,
                         conversation.calendarSpaceId(),
-                        inferred.taskType(),
-                        "collecting_info",
-                        inferred.draftPayload(),
-                        inferred.missingFields(),
-                        null,
-                        OffsetDateTime.now(DEFAULT_ZONE).plusHours(2)));
-                taskStates = aiRepository.findOpenTaskStates(currentUserId, conversation.id()).stream()
-                        .filter(task -> task.id() == taskId)
-                        .toList();
-                reply = missingFieldsReply(inferred.missingFields());
-            }
-        }
-
-        for (AiRequestedToolCall toolCall : requestedToolCalls) {
-            ToolExecutionResult result = executeTool(currentUserId, toolCall.toolName(), new AiToolExecutionRequest(
-                    conversation.id(),
-                    userMessageId,
-                    conversation.calendarSpaceId(),
-                    normalizeArguments(toolCall.arguments())));
-            toolResults.add(result);
-            if (result.confirmationRequired()) {
-                confirmations.addAll(aiRepository.findPendingConfirmations(currentUserId).stream()
-                        .filter(item -> item.conversationId() == conversation.id())
-                        .toList());
-            } else {
-                resultCard = resultCardFor(result);
-                if (shouldUseToolReply(result, reply)) {
-                    reply = successReply(result);
+                        normalizeArguments(toolCall.arguments())));
+                toolResults.add(result);
+                reactMessages.add(AiModelMessage.toolObservation(
+                        toolCall.id(),
+                        toolCall.toolName(),
+                        toolObservationJson(result)));
+                if (result.confirmationRequired()) {
+                    confirmations.addAll(aiRepository.findPendingConfirmations(currentUserId).stream()
+                            .filter(item -> item.conversationId() == conversation.id())
+                            .toList());
+                } else {
+                    resultCard = resultCardFor(result);
+                    if (shouldUseToolReply(reply)) {
+                        reply = successReply(result);
+                    }
                 }
             }
+            requestedToolCalls = List.of();
+            AiModelResponse finalResponse = aiModelClient.chat(modelRequest(
+                    reactMessages,
+                    calendarToolIntent && confirmations.isEmpty()));
+            if (hasUsefulModelReply(finalResponse.content())) {
+                reply = blankToNull(finalResponse.content());
+            }
+            requestedToolCalls = confirmations.isEmpty() && finalResponse.toolCalls() != null
+                    ? finalResponse.toolCalls()
+                    : List.of();
         }
 
         if (!confirmations.isEmpty() && (reply == null || reply.isBlank() || "AI 模型客户端已就绪".equals(reply))) {
@@ -421,157 +418,115 @@ public class AiService {
         }
     }
 
-    private AiModelRequest modelRequest(long currentUserId, long conversationId, String currentMessage) {
+    private AiModelRequest modelRequest(List<AiModelMessage> messages, boolean includeTools) {
+        return new AiModelRequest(
+                messages,
+                includeTools ? List.copyOf(toolRegistry.definitions()) : List.of(),
+                Map.of());
+    }
+
+    private List<AiModelMessage> modelMessages(long currentUserId, long conversationId) {
         List<AiModelMessage> messages = new ArrayList<>();
         messages.add(new AiModelMessage("system", """
-                你是语音日历 AI Agent。只能通过工具改变日历数据。
-                如果用户要查询日程，调用 list_events 或 search_events。
-                如果用户要创建明确日程，调用 create_event。
-                如果用户要删除日程，调用 search_events 或 delete_event；delete_event 是高风险操作。
-                如果信息缺少标题、日期或时间，用中文简短追问，不要编造。
+                你是语音日历 AI Agent，也可以进行普通闲聊。
+                非日历意图直接用中文回答，不要调用工具。
+                只有用户明确要创建日程、查询日程、检查冲突、推荐时间、修改或删除日程时，才使用 ReACT 工作流：发起工具 Action，收到工具 Observation 后给出 Final Answer。
+                只能通过工具读取或改变日历数据，不要凭空编造日程。
+                查询日程调用 list_events 或 search_events；创建明确日程调用 create_event；检查冲突调用 check_conflict；推荐时间应先查询相关时间范围的日程再给建议；删除日程可调用 search_events 或 delete_event，delete_event 是高风险操作。
+                查询任意时间段时，把用户表达的日期范围解析成 start/end ISO 8601 参数传给 list_events；例如今天、明天、下周、本月、某一天、某月、某年、从某日到某日都应明确起止时间。
+                如果日历操作信息缺少标题、日期或时间，用中文简短追问，不要编造。
                 时间使用 ISO 8601，默认时区 Asia/Shanghai。
+                最终回答应直接面向用户，不暴露 Thought/Action/Observation 标签。
                 """));
         aiRepository.findMessages(conversationId, currentUserId).stream()
                 .limit(12)
                 .forEach(message -> messages.add(new AiModelMessage(message.role(), message.content())));
-        messages.add(new AiModelMessage("user", currentMessage));
-        return new AiModelRequest(messages, List.copyOf(toolRegistry.definitions()), Map.of());
+        return messages;
     }
 
-    private InferredAction inferAction(String message) {
+    private List<AiRequestedToolCall> withToolCallIds(List<AiRequestedToolCall> toolCalls, int step) {
+        List<AiRequestedToolCall> normalized = new ArrayList<>();
+        int index = 0;
+        for (AiRequestedToolCall toolCall : toolCalls) {
+            String id = blankToNull(toolCall.id());
+            if (id == null) {
+                id = "call_" + step + "_" + index + "_" + Math.abs(toolCall.toolName().hashCode());
+            }
+            normalized.add(new AiRequestedToolCall(id, toolCall.toolName(), normalizeArguments(toolCall.arguments())));
+            index++;
+        }
+        return normalized;
+    }
+
+    private String toolObservationJson(ToolExecutionResult result) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "toolName", result.toolName(),
+                    "status", result.status(),
+                    "confirmationRequired", result.confirmationRequired(),
+                    "data", result.data() == null ? Map.of() : result.data()));
+        } catch (JsonProcessingException exception) {
+            return "{\"status\":\"" + result.status() + "\"}";
+        }
+    }
+
+    private boolean hasUsefulModelReply(String reply) {
+        String normalized = blankToNull(reply);
+        return normalized != null && !"AI 模型客户端已就绪".equals(normalized);
+    }
+
+    private boolean isUndoIntent(String message) {
         String normalized = message == null ? "" : message.trim();
-        if (normalized.contains("撤销")) {
-            return new InferredAction("undo_last_ai_operation", null, Map.of(), List.of(), null);
-        }
-        if (normalized.contains("删除") || normalized.contains("删掉")) {
-            Long eventId = firstLong(normalized);
-            if (eventId == null) {
-                return new InferredAction(
-                        "delete_event",
-                        null,
-                        Map.of("rawText", normalized),
-                        List.of("eventId"),
-                        null);
-            }
-            return new InferredAction(
-                    "delete_event",
-                    new AiRequestedToolCall("delete_event", Map.of("eventId", eventId)),
-                    Map.of("eventId", eventId),
-                    List.of(),
-                    null);
-        }
-        if (normalized.contains("创建") || normalized.contains("安排") || normalized.contains("提醒我") || normalized.contains("新建")) {
-            Map<String, Object> payload = inferCreatePayload(normalized);
-            List<String> missing = new ArrayList<>();
-            if (!payload.containsKey("title")) {
-                missing.add("title");
-            }
-            if (!payload.containsKey("startTime")) {
-                missing.add("startTime");
-            }
-            if (!payload.containsKey("endTime")) {
-                missing.add("endTime");
-            }
-            return new InferredAction(
-                    "create_event",
-                    missing.isEmpty() ? new AiRequestedToolCall("create_event", payload) : null,
-                    payload,
-                    missing,
-                    null);
-        }
-        OffsetDateTime now = OffsetDateTime.now(DEFAULT_ZONE);
-        return new InferredAction(
-                "list_events",
-                new AiRequestedToolCall("list_events", Map.of(
-                        "start", now.toLocalDate().atStartOfDay(DEFAULT_ZONE).toOffsetDateTime().toString(),
-                        "end", now.toLocalDate().plusDays(1).atStartOfDay(DEFAULT_ZONE).toOffsetDateTime().toString())),
-                Map.of(),
-                List.of(),
-                null);
+        return normalized.contains("撤销");
     }
 
-    private Map<String, Object> inferCreatePayload(String message) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        String title = message
-                .replace("帮我", "")
-                .replace("提醒我", "")
-                .replace("创建", "")
-                .replace("新建", "")
-                .replace("安排", "")
-                .trim();
-        if (!title.isBlank()) {
-            payload.put("title", title.length() > 60 ? title.substring(0, 60) : title);
+    private boolean isCalendarToolIntent(String message) {
+        String normalized = message == null ? "" : message.trim().toLowerCase();
+        if (normalized.isBlank()) {
+            return false;
         }
-        Optional<OffsetDateTime> start = inferStartTime(message);
-        start.ifPresent(value -> {
-            payload.put("startTime", value.toString());
-            payload.put("endTime", value.plusHours(1).toString());
-        });
-        return payload;
-    }
-
-    private Optional<OffsetDateTime> inferStartTime(String message) {
-        OffsetDateTime base = OffsetDateTime.now(DEFAULT_ZONE);
-        if (message.contains("明天")) {
-            base = base.plusDays(1);
-        } else if (message.contains("后天")) {
-            base = base.plusDays(2);
-        } else if (!message.contains("今天")) {
-            return Optional.empty();
+        if (normalized.matches(".*(删除|取消)\\s*\\d+.*")) {
+            return true;
         }
-        int hour = -1;
-        if (message.contains("上午")) {
-            hour = firstHour(message, 9);
-        } else if (message.contains("下午")) {
-            hour = firstHour(message, 3);
-            if (hour < 12) {
-                hour += 12;
-            }
-        } else if (message.contains("晚上")) {
-            hour = firstHour(message, 8);
-            if (hour < 12) {
-                hour += 12;
-            }
-        } else {
-            hour = firstHour(message, -1);
-        }
-        if (hour < 0) {
-            return Optional.empty();
-        }
-        return Optional.of(base.withHour(hour).withMinute(0).withSecond(0).withNano(0));
-    }
-
-    private int firstHour(String message, int defaultHour) {
-        Long number = firstLong(message);
-        if (number != null && number >= 0 && number <= 23) {
-            return number.intValue();
-        }
-        Map<String, Integer> zh = new LinkedHashMap<>();
-        zh.put("一", 1);
-        zh.put("二", 2);
-        zh.put("两", 2);
-        zh.put("三", 3);
-        zh.put("四", 4);
-        zh.put("五", 5);
-        zh.put("六", 6);
-        zh.put("七", 7);
-        zh.put("八", 8);
-        zh.put("九", 9);
-        zh.put("十", 10);
-        for (Map.Entry<String, Integer> entry : zh.entrySet()) {
-            if (message.contains(entry.getKey() + "点")) {
-                return entry.getValue();
-            }
-        }
-        return defaultHour;
-    }
-
-    private Long firstLong(String value) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\d+").matcher(value);
-        if (!matcher.find()) {
-            return null;
-        }
-        return Long.parseLong(matcher.group());
+        return normalized.contains("日程")
+                || normalized.contains("日历")
+                || normalized.contains("会议")
+                || normalized.contains("行程")
+                || normalized.contains("事项")
+                || normalized.contains("安排")
+                || normalized.contains("提醒")
+                || normalized.contains("冲突")
+                || normalized.contains("空闲")
+                || normalized.contains("有空")
+                || normalized.contains("忙不忙")
+                || normalized.contains("推荐时间")
+                || normalized.contains("开会时间")
+                || normalized.contains("有什么事")
+                || normalized.contains("有啥事")
+                || normalized.contains("今天")
+                || normalized.contains("明天")
+                || normalized.contains("后天")
+                || normalized.contains("本周")
+                || normalized.contains("下周")
+                || normalized.contains("本月")
+                || normalized.contains("下月")
+                || normalized.contains("创建日程")
+                || normalized.contains("新建日程")
+                || normalized.contains("创建会议")
+                || normalized.contains("新建会议")
+                || normalized.contains("删除日程")
+                || normalized.contains("取消日程")
+                || normalized.contains("删除会议")
+                || normalized.contains("取消会议")
+                || normalized.contains("改到")
+                || normalized.contains("推迟")
+                || normalized.contains("提前")
+                || normalized.contains("schedule")
+                || normalized.contains("calendar")
+                || normalized.contains("meeting")
+                || normalized.contains("event")
+                || normalized.contains("availability")
+                || normalized.contains("conflict");
     }
 
     private void writeAiOperationLogIfNeeded(
@@ -654,10 +609,7 @@ public class AiService {
         return "已完成。";
     }
 
-    private boolean shouldUseToolReply(ToolExecutionResult result, String reply) {
-        if ("list_events".equals(result.toolName())) {
-            return true;
-        }
+    private boolean shouldUseToolReply(String reply) {
         return reply == null || reply.isBlank() || "AI 模型客户端已就绪".equals(reply);
     }
 
@@ -693,19 +645,6 @@ public class AiService {
     private String formatEventTime(EventResponse event) {
         java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm");
         return formatter.format(event.startTime()) + " - " + formatter.format(event.endTime());
-    }
-
-    private String missingFieldsReply(List<String> missingFields) {
-        List<String> labels = missingFields.stream()
-                .map(field -> switch (field) {
-                    case "title" -> "主题";
-                    case "startTime" -> "开始时间";
-                    case "endTime" -> "结束时间";
-                    case "eventId" -> "具体日程";
-                    default -> field;
-                })
-                .toList();
-        return "还需要补充：" + String.join("、", labels) + "。";
     }
 
     private Map<String, Object> normalizeArguments(Map<String, Object> arguments) {
@@ -788,11 +727,4 @@ public class AiService {
         }
     }
 
-    private record InferredAction(
-            String taskType,
-            AiRequestedToolCall toolCall,
-            Map<String, Object> draftPayload,
-            List<String> missingFields,
-            String riskLevel) {
-    }
 }

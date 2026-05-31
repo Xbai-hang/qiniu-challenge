@@ -9,6 +9,7 @@ import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +40,14 @@ public class AiController {
     public ApiResponse<List<AiConversation>> listConversations(
             @AuthenticationPrincipal CurrentUserPrincipal principal) {
         return ApiResponse.success(aiService.listConversations(principal.userId()));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}")
+    public ApiResponse<Void> deleteConversation(
+            @AuthenticationPrincipal CurrentUserPrincipal principal,
+            @PathVariable long conversationId) {
+        aiService.deleteConversation(principal.userId(), conversationId);
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/conversations/{conversationId}/messages")

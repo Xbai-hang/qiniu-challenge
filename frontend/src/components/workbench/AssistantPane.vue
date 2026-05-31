@@ -24,17 +24,20 @@
         <span>{{ ai.state.conversations.length }}</span>
       </div>
       <div v-if="ai.state.isLoadingHistory" class="assistant-empty">正在加载历史会话</div>
-      <button
+      <div
         v-for="conversation in ai.state.conversations"
         v-else
         :key="conversation.id"
-        type="button"
         :class="['assistant-history-item', ai.state.conversationId === conversation.id ? 'active' : '']"
-        @click="ai.selectConversation(conversation.id)"
       >
-        <strong>{{ conversation.title || 'AI 对话' }}</strong>
-        <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
-      </button>
+        <button type="button" class="ai-history-select" @click="ai.selectConversation(conversation.id)">
+          <strong>{{ conversation.title || 'AI 对话' }}</strong>
+          <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
+        </button>
+        <button type="button" class="ai-history-delete" aria-label="删除会话" @click="ai.deleteConversation(conversation.id)">
+          <Delete />
+        </button>
+      </div>
     </section>
 
     <button type="button" class="voice-command" aria-label="开始语音输入">
@@ -133,7 +136,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { Clock, Microphone, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import { Clock, Delete, Microphone, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
 import type { CalendarEvent, CalendarSpace } from '../../api'
 import { useAiAssistantSession } from '../../composables/useAiAssistantSession'
 

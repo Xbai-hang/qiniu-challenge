@@ -17,7 +17,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "app.ai.provider", havingValue = "openai-compatible")
+@ConditionalOnProperty(name = "app.ai.provider", havingValue = "openai-compatible", matchIfMissing = true)
 public class OpenAiCompatibleAiModelClient implements AiModelClient {
 
     private final AiProperties properties;
@@ -41,9 +41,7 @@ public class OpenAiCompatibleAiModelClient implements AiModelClient {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("model", properties.getModel());
             payload.put("messages", request.messages().stream()
-                    .map(message -> Map.of(
-                            "role", message.role(),
-                            "content", message.content()))
+                    .map(this::toOpenAiMessage)
                     .toList());
             payload.put("temperature", properties.getTemperature());
             if (request.tools() != null && !request.tools().isEmpty()) {
@@ -99,6 +97,41 @@ public class OpenAiCompatibleAiModelClient implements AiModelClient {
                         "parameters", normalizeSchema(definition.inputSchema())));
     }
 
+    private Map<String, Object> toOpenAiMessage(AiModelMessage message) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("role", message.role());
+        if (hasText(message.name())) {
+            node.put("name", message.name());
+        }
+        if (hasText(message.toolCallId())) {
+            node.put("tool_call_id", message.toolCallId());
+        }
+        if (message.toolCalls() != null && !message.toolCalls().isEmpty()) {
+            node.put("content", hasText(message.content()) ? message.content() : null);
+            node.put("tool_calls", message.toolCalls().stream()
+                    .map(this::toOpenAiToolCall)
+                    .toList());
+        } else {
+            node.put("content", message.content() == null ? "" : message.content());
+        }
+        return node;
+    }
+
+    private Map<String, Object> toOpenAiToolCall(AiRequestedToolCall toolCall) {
+        String id = hasText(toolCall.id()) ? toolCall.id() : generatedToolCallId(toolCall.toolName());
+        try {
+            return Map.of(
+                    "id", id,
+                    "type", "function",
+                    "function", Map.of(
+                            "name", toolCall.toolName(),
+                            "arguments", objectMapper.writeValueAsString(
+                                    toolCall.arguments() == null ? Map.of() : toolCall.arguments())));
+        } catch (Exception exception) {
+            throw new ApiException(ErrorCode.AI_SERVICE_UNAVAILABLE, "AI 工具参数序列化失败：" + exception.getMessage());
+        }
+    }
+
     private Map<String, Object> normalizeSchema(Map<String, Object> schema) {
         Object propertiesNode = schema == null ? null : schema.get("properties");
         if (!(propertiesNode instanceof List<?> fields)) {
@@ -135,9 +168,14 @@ public class OpenAiCompatibleAiModelClient implements AiModelClient {
                         new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
                         });
             }
-            toolCalls.add(new AiRequestedToolCall(name, arguments));
+            String id = node.path("id").asText(null);
+            toolCalls.add(new AiRequestedToolCall(id, name, arguments));
         }
         return toolCalls;
+    }
+
+    private String generatedToolCallId(String toolName) {
+        return "call_" + Math.abs((toolName == null ? "tool" : toolName).hashCode());
     }
 
     private boolean hasText(String value) {

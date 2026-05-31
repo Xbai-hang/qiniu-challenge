@@ -2,6 +2,11 @@ package com.qiniu.challenge.ai;
 
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,10 +14,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qiniu.challenge.common.ApiException;
+import com.qiniu.challenge.common.ErrorCode;
+import java.util.List;
+import java.util.Map;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -32,6 +44,15 @@ class AiControllerTests {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @MockBean
+    private AiModelClient aiModelClient;
+
+    @BeforeEach
+    void setUpAiModelClient() {
+        reset(aiModelClient);
+        when(aiModelClient.provider()).thenReturn("test-model");
+    }
 
     @Test
     void conversationsAndMessagesArePersisted() throws Exception {
@@ -73,6 +94,38 @@ class AiControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].content").value("今天有什么安排"));
+    }
+
+    @Test
+    void conversationCanBeDeletedFromHistory() throws Exception {
+        RegisteredUser user = register("ai_conversation_delete_user", "ai-conversation-delete-user@example.com", "AI Delete History");
+        long conversationId = createConversation(user, "待删除会话");
+
+        mockMvc.perform(post("/api/ai/conversations/{conversationId}/messages", conversationId)
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "role": "user",
+                                  "inputMode": "text",
+                                  "content": "你好"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/api/ai/conversations/{conversationId}", conversationId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/ai/conversations")
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].id", Matchers.not(Matchers.hasItem((int) conversationId))));
+
+        mockMvc.perform(get("/api/ai/conversations/{conversationId}/messages", conversationId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -215,6 +268,16 @@ class AiControllerTests {
     @Test
     void chatCanCreateEventAndUndoLastAiOperation() throws Exception {
         RegisteredUser user = register("ai_chat_create_user", "ai-chat-create-user@example.com", "AI Chat Create");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "", List.of(new AiRequestedToolCall(
+                        "call_create_event",
+                        "create_event",
+                        Map.of(
+                                "title", "项目复盘",
+                                "startTime", "2026-05-30T15:00:00+08:00",
+                                "endTime", "2026-05-30T16:00:00+08:00",
+                                "participantUserIds", List.of(user.id()))))))
+                .thenReturn(new AiModelResponse("test-model", "test", "已为你创建「项目复盘」。", List.of()));
 
         MvcResult chatResult = mockMvc.perform(post("/api/ai/chat")
                         .header("Authorization", "Bearer " + user.token())
@@ -261,6 +324,14 @@ class AiControllerTests {
     void chatListEventsIncludesEventDetailsInReply() throws Exception {
         RegisteredUser user = register("ai_chat_list_user", "ai-chat-list-user@example.com", "AI Chat List");
         createEvent(user, "范围内日程");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "", List.of(new AiRequestedToolCall(
+                        "call_list_events",
+                        "list_events",
+                        Map.of(
+                                "start", "2026-05-30T00:00:00+08:00",
+                                "end", "2026-05-31T00:00:00+08:00")))))
+                .thenReturn(new AiModelResponse("test-model", "test", "当前范围内有 1 个日程：范围内日程，05-30 12:00 开始。", List.of()));
 
         mockMvc.perform(post("/api/ai/chat")
                         .header("Authorization", "Bearer " + user.token())
@@ -282,6 +353,12 @@ class AiControllerTests {
     void confirmationCanExecuteHighRiskDeleteFromChat() throws Exception {
         RegisteredUser user = register("ai_chat_delete_user", "ai-chat-delete-user@example.com", "AI Chat Delete");
         long eventId = createEvent(user, "确认删除目标");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "", List.of(new AiRequestedToolCall(
+                        "call_delete_event",
+                        "delete_event",
+                        Map.of("eventId", eventId)))))
+                .thenReturn(new AiModelResponse("test-model", "test", "确认删除这个日程吗？", List.of()));
 
         MvcResult chatResult = mockMvc.perform(post("/api/ai/chat")
                         .header("Authorization", "Bearer " + user.token())
@@ -310,6 +387,52 @@ class AiControllerTests {
                 Integer.class,
                 eventId);
         MatcherAssert.assertThat(visible, Matchers.is(0));
+    }
+
+    @Test
+    void chatReturnsAiServiceUnavailableWhenModelCallFails() throws Exception {
+        RegisteredUser user = register("ai_chat_model_failed_user", "ai-chat-model-failed-user@example.com", "AI Chat Failed");
+        when(aiModelClient.chat(any()))
+                .thenThrow(new ApiException(ErrorCode.AI_SERVICE_UNAVAILABLE, "模型调用失败"));
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "text",
+                                  "message": "今天有什么安排？"
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("AI_SERVICE_UNAVAILABLE"));
+    }
+
+    @Test
+    void chatCanAnswerCasualConversationWithoutTools() throws Exception {
+        RegisteredUser user = register("ai_chat_casual_user", "ai-chat-casual-user@example.com", "AI Chat Casual");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "我是你的 AI 日历助手，也可以陪你聊聊天。", List.of()));
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "text",
+                                  "message": "你是什么模型？"
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reply").value("我是你的 AI 日历助手，也可以陪你聊聊天。"))
+                .andExpect(jsonPath("$.data.toolCalls.length()").value(0));
+
+        ArgumentCaptor<AiModelRequest> requestCaptor = ArgumentCaptor.forClass(AiModelRequest.class);
+        verify(aiModelClient).chat(requestCaptor.capture());
+        MatcherAssert.assertThat(requestCaptor.getValue().tools(), Matchers.empty());
     }
 
     private long createEvent(RegisteredUser user, String title) throws Exception {
