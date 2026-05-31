@@ -4,7 +4,7 @@
 
 ## 相关信息
 
-> 七牛云 x XEngineer 暑期实训营 2026/02/29 第二批次【赛题一】
+> 七牛云 x XEngineer 暑期实训营 2026/05/29 第二批次【选题一】
 
 - 队伍名称：木子木子
 - 项目仓库：[https://github.com/Xbai-hang/qiniu-challenge](#)
