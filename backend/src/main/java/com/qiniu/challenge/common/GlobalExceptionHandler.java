@@ -4,6 +4,8 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -13,6 +15,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
@@ -20,6 +24,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiResponse<Void>> handleApiException(ApiException exception) {
@@ -60,6 +66,20 @@ public class GlobalExceptionHandler {
                 ApiError.of(ErrorCode.BAD_REQUEST, exception.getMessage()));
     }
 
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceeded() {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                ApiError.of(ErrorCode.BAD_REQUEST, "音频文件过大，请缩短录音或控制在 10MB 内"));
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMultipartException(MultipartException exception) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                ApiError.of(ErrorCode.BAD_REQUEST, "音频上传失败：" + exception.getMessage()));
+    }
+
     @ExceptionHandler({
             NoHandlerFoundException.class,
             NoResourceFoundException.class
@@ -84,7 +104,8 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleException() {
+    public ResponseEntity<ApiResponse<Void>> handleException(Exception exception) {
+        log.error("Unhandled API exception", exception);
         return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, ApiError.of(ErrorCode.INTERNAL_ERROR));
     }
 

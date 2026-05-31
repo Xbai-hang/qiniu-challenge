@@ -40,11 +40,23 @@
       </div>
     </section>
 
-    <button type="button" class="voice-command" aria-label="开始语音输入">
+    <button
+      type="button"
+      :class="['voice-command', isRecording ? 'recording' : '', ai.state.isUploadingVoice ? 'uploading' : '']"
+      :aria-label="isRecording ? '停止语音输入' : '开始语音输入'"
+      :disabled="!currentSpace || ai.state.isUploadingVoice || (ai.state.isSending && !isRecording)"
+      @click="toggleRecording"
+    >
       <span class="voice-orb compact" aria-hidden="true">
         <Microphone />
       </span>
+      <span class="voice-status">{{ voiceStatusText }}</span>
     </button>
+
+    <div v-if="recordingError" class="voice-transcription">
+      <span>{{ recordingError ? '录音失败' : '转写文本' }}</span>
+      <p>{{ recordingError }}</p>
+    </div>
 
     <form class="ai-input-row" @submit.prevent="ai.sendDraft">
       <input
@@ -60,10 +72,16 @@
     </form>
 
     <div class="assistant-chat-log" aria-label="AI 对话记录">
-      <div v-for="message in ai.state.messages" :key="message.id" :class="['assistant-message', message.role]">
-        <span>{{ message.role === 'user' ? '你' : 'AI' }}</span>
-        <p>{{ message.content }}</p>
-      </div>
+      <AiVoiceMessage
+        v-for="message in ai.state.messages"
+        :key="message.id"
+        :message="message"
+        :preparing-message-id="ai.state.preparingSpeechMessageId"
+        :speaking-message-id="ai.state.speakingMessageId"
+        @play-user="ai.playUserVoice"
+        @play-assistant="ai.playAssistantMessage"
+        @pause-assistant="ai.pauseSpeech"
+      />
       <div v-if="ai.state.messages.length === 0" class="assistant-empty">
         试试“今天有什么安排”或“明天下午三点安排项目复盘”。
       </div>
@@ -131,13 +149,15 @@
         <span>撤销最近 AI 操作</span>
       </button>
     </section>
+
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Clock, Delete, Microphone, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
 import type { CalendarEvent, CalendarSpace } from '../../api'
+import AiVoiceMessage from '../AiVoiceMessage.vue'
 import { useAiAssistantSession } from '../../composables/useAiAssistantSession'
 
 defineEmits<{
@@ -153,6 +173,24 @@ const props = defineProps<{
 }>()
 
 const ai = useAiAssistantSession()
+const isRecording = ref(false)
+const recordingError = ref('')
+const mediaRecorder = ref<MediaRecorder | null>(null)
+const mediaStream = ref<MediaStream | null>(null)
+let audioChunks: BlobPart[] = []
+
+const voiceStatusText = computed(() => {
+  if (isRecording.value) {
+    return '录音中'
+  }
+  if (ai.state.isUploadingVoice) {
+    return '上传中'
+  }
+  if (ai.state.isSending) {
+    return '理解中'
+  }
+  return '按住你的日程想法'
+})
 
 const timelineItems = computed(() => [
   {
@@ -181,6 +219,75 @@ async function toggleHistory() {
   }
 }
 
+async function toggleRecording() {
+  if (isRecording.value) {
+    stopRecording()
+    return
+  }
+
+  await startRecording()
+}
+
+async function startRecording() {
+  recordingError.value = ''
+
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    recordingError.value = '当前浏览器不支持录音，请使用文本输入'
+    return
+  }
+
+  try {
+    mediaStream.value = await navigator.mediaDevices.getUserMedia({ audio: true })
+    audioChunks = []
+    const mimeType = preferredAudioMimeType()
+    const recorder = new MediaRecorder(mediaStream.value, mimeType ? { mimeType } : undefined)
+    mediaRecorder.value = recorder
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data)
+      }
+    }
+    recorder.onerror = () => {
+      recordingError.value = '录音过程中断，请重试'
+      cleanupRecorder()
+    }
+    recorder.onstop = () => {
+      const audio = new Blob(audioChunks, { type: recorder.mimeType || 'audio/webm' })
+      cleanupRecorder()
+      if (audio.size > 0) {
+        void ai.sendVoice(audio)
+      }
+    }
+
+    recorder.start()
+    isRecording.value = true
+  } catch (error) {
+    cleanupRecorder()
+    recordingError.value = error instanceof Error ? error.message : '无法访问麦克风'
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder.value && mediaRecorder.value.state !== 'inactive') {
+    mediaRecorder.value.stop()
+    return
+  }
+  cleanupRecorder()
+}
+
+function cleanupRecorder() {
+  mediaStream.value?.getTracks().forEach((track) => track.stop())
+  mediaStream.value = null
+  mediaRecorder.value = null
+  isRecording.value = false
+}
+
+function preferredAudioMimeType() {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+}
+
 function formatConversationTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -196,5 +303,10 @@ function spaceTypeLabel(type: CalendarSpace['type']) {
 
 onMounted(() => {
   void ai.loadConversations()
+})
+
+onBeforeUnmount(() => {
+  cleanupRecorder()
+  ai.stopSpeech()
 })
 </script>

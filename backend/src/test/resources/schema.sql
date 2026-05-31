@@ -3,7 +3,9 @@ DROP TABLE IF EXISTS operation_logs;
 DROP TABLE IF EXISTS ai_tool_call_logs;
 DROP TABLE IF EXISTS pending_confirmations;
 DROP TABLE IF EXISTS ai_task_states;
+DROP TABLE IF EXISTS tts_cache;
 DROP TABLE IF EXISTS ai_messages;
+DROP TABLE IF EXISTS speech_transcriptions;
 DROP TABLE IF EXISTS ai_conversations;
 DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS event_reminders;
@@ -151,6 +153,29 @@ CREATE TABLE ai_conversations (
 CREATE INDEX idx_conversations_user_time ON ai_conversations (user_id, created_at);
 CREATE INDEX idx_conversations_space_time ON ai_conversations (calendar_space_id, created_at);
 
+CREATE TABLE speech_transcriptions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  calendar_space_id BIGINT NOT NULL,
+  conversation_id BIGINT NULL,
+  provider VARCHAR(64) NOT NULL,
+  model_name VARCHAR(128) NULL,
+  transcript_text CLOB NOT NULL,
+  confidence DECIMAL(5,4) NULL,
+  audio_format VARCHAR(32) NULL,
+  audio_duration_ms INT NULL,
+  status VARCHAR(32) NOT NULL,
+  error_code VARCHAR(64) NULL,
+  error_message CLOB NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_transcriptions_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_transcriptions_space FOREIGN KEY (calendar_space_id) REFERENCES calendar_spaces (id),
+  CONSTRAINT fk_transcriptions_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id)
+);
+
+CREATE INDEX idx_transcriptions_user_time ON speech_transcriptions (user_id, created_at);
+CREATE INDEX idx_transcriptions_conversation ON speech_transcriptions (conversation_id);
+
 CREATE TABLE ai_messages (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   conversation_id BIGINT NOT NULL,
@@ -166,12 +191,33 @@ CREATE TABLE ai_messages (
   model_name VARCHAR(128) NULL,
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id),
-  CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users (id)
+  CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_messages_transcription FOREIGN KEY (transcription_id) REFERENCES speech_transcriptions (id)
 );
 
 CREATE INDEX idx_messages_conversation_time ON ai_messages (conversation_id, created_at);
 CREATE INDEX idx_messages_user_time ON ai_messages (user_id, created_at);
 CREATE INDEX idx_messages_transcription ON ai_messages (transcription_id);
+
+CREATE TABLE tts_cache (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  message_id BIGINT NULL,
+  provider VARCHAR(64) NOT NULL,
+  voice VARCHAR(64) NULL,
+  text_hash VARCHAR(128) NOT NULL,
+  audio_url VARCHAR(512) NULL,
+  storage_key VARCHAR(512) NULL,
+  status VARCHAR(32) NOT NULL,
+  expires_at TIMESTAMP(3) NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_tts_user FOREIGN KEY (user_id) REFERENCES users (id),
+  CONSTRAINT fk_tts_message FOREIGN KEY (message_id) REFERENCES ai_messages (id)
+);
+
+CREATE INDEX idx_tts_user_time ON tts_cache (user_id, created_at);
+CREATE INDEX idx_tts_expire ON tts_cache (expires_at);
+CREATE INDEX idx_tts_text_hash ON tts_cache (text_hash);
 
 CREATE TABLE ai_task_states (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

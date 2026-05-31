@@ -10,7 +10,10 @@ import com.qiniu.challenge.event.EventUpdateRequest;
 import com.qiniu.challenge.reminder.CreateReminderRequest;
 import com.qiniu.challenge.reminder.ReminderService;
 import com.qiniu.challenge.reminder.SnoozeReminderRequest;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +22,8 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class AiToolConfiguration {
+
+    private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Shanghai");
 
     @Bean
     RegisteredTool listEventsTool(EventService eventService) {
@@ -96,7 +101,7 @@ public class AiToolConfiguration {
                 eventService.updateEvent(
                         context.userId(),
                         requireLong(arguments, "eventId"),
-                        objectMapper.convertValue(arguments, EventUpdateRequest.class))));
+                        objectMapper.convertValue(normalizeDateTimeArguments(arguments), EventUpdateRequest.class))));
     }
 
     @Bean
@@ -145,7 +150,7 @@ public class AiToolConfiguration {
                 reminderService.createReminder(
                         context.userId(),
                         requireLong(arguments, "eventId"),
-                        objectMapper.convertValue(arguments, CreateReminderRequest.class))));
+                        objectMapper.convertValue(normalizeDateTimeArguments(arguments), CreateReminderRequest.class))));
     }
 
     @Bean
@@ -176,7 +181,7 @@ public class AiToolConfiguration {
                 reminderService.snoozeReminder(
                         context.userId(),
                         requireLong(arguments, "reminderId"),
-                        objectMapper.convertValue(arguments, SnoozeReminderRequest.class))));
+                        objectMapper.convertValue(normalizeDateTimeArguments(arguments), SnoozeReminderRequest.class))));
     }
 
     private static Map<String, Object> schema(String... fields) {
@@ -192,7 +197,7 @@ public class AiToolConfiguration {
             Class<T> targetType) {
         Map<String, Object> merged = new LinkedHashMap<>(arguments);
         merged.putIfAbsent("calendarSpaceId", calendarSpaceId);
-        return objectMapper.convertValue(merged, targetType);
+        return objectMapper.convertValue(normalizeDateTimeArguments(merged), targetType);
     }
 
     private static long requireLong(Map<String, Object> arguments, String field) {
@@ -232,7 +237,59 @@ public class AiToolConfiguration {
 
     private static OffsetDateTime offsetDateTime(Object value) {
         String stringValue = stringValue(value);
-        return stringValue == null ? null : OffsetDateTime.parse(stringValue);
+        if (stringValue == null) {
+            return null;
+        }
+        return parseOffsetDateTime(stringValue);
+    }
+
+    private static Map<String, Object> normalizeDateTimeArguments(Map<String, Object> arguments) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        arguments.forEach((key, value) -> {
+            if (value instanceof Map<?, ?> nested) {
+                Map<String, Object> nestedMap = new LinkedHashMap<>();
+                nested.forEach((nestedKey, nestedValue) -> {
+                    if (nestedKey != null) {
+                        nestedMap.put(nestedKey.toString(), nestedValue);
+                    }
+                });
+                normalized.put(key, normalizeDateTimeArguments(nestedMap));
+            } else if (isDateTimeField(key) && value instanceof String stringValue) {
+                normalized.put(key, normalizeDateTimeString(stringValue));
+            } else {
+                normalized.put(key, value);
+            }
+        });
+        return normalized;
+    }
+
+    private static boolean isDateTimeField(String key) {
+        return "start".equals(key)
+                || "end".equals(key)
+                || "startTime".equals(key)
+                || "endTime".equals(key)
+                || "repeatUntil".equals(key)
+                || "triggerAt".equals(key);
+    }
+
+    private static String normalizeDateTimeString(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty()) {
+            return normalized;
+        }
+        return parseOffsetDateTime(normalized).toString();
+    }
+
+    private static OffsetDateTime parseOffsetDateTime(String value) {
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(value).atZone(DEFAULT_ZONE).toOffsetDateTime();
+            } catch (DateTimeParseException exception) {
+                throw new ApiException(ErrorCode.BAD_REQUEST, "时间格式不合法：" + value);
+            }
+        }
     }
 
     private static Map<String, Object> deleteResult(EventService eventService, long userId, long eventId) {
