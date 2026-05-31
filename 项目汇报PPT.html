@@ -1,0 +1,1091 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f8fbff" />
+  <title>语历 Vocalendar</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8fbff;
+      --paper: #ffffff;
+      --ink: #24323f;
+      --muted: #697a8b;
+      --line: #dbe6ef;
+      --green: #64b99e;
+      --teal: #69b7d6;
+      --orange: #efb66a;
+      --red: #ee8c86;
+      --violet: #a79adf;
+      --shadow: 0 24px 70px rgba(91, 124, 150, 0.13);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      overflow: hidden;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(105, 148, 180, 0.07) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(105, 148, 180, 0.055) 1px, transparent 1px),
+        radial-gradient(circle at 78% 18%, rgba(181, 222, 238, 0.46), transparent 30%),
+        radial-gradient(circle at 18% 86%, rgba(239, 182, 106, 0.22), transparent 26%),
+        var(--bg);
+      background-size: 36px 36px, 36px 36px, 100% 100%, 100% 100%, 100% 100%;
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      -webkit-tap-highlight-color: rgba(105, 183, 214, 0.18);
+    }
+
+    body {
+      touch-action: manipulation;
+    }
+
+    .skip-link {
+      position: fixed;
+      left: 18px;
+      top: 12px;
+      z-index: 100;
+      transform: translateY(-140%);
+      background: #e8f6fb;
+      color: var(--ink);
+      padding: 10px 14px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    .skip-link:focus-visible {
+      transform: translateY(0);
+      outline: 3px solid var(--orange);
+      outline-offset: 3px;
+    }
+
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    .slide {
+      width: 100vw;
+      height: 100vh;
+      padding: max(34px, env(safe-area-inset-top)) max(48px, env(safe-area-inset-right)) max(58px, env(safe-area-inset-bottom)) max(48px, env(safe-area-inset-left));
+      display: grid;
+      place-items: stretch;
+    }
+
+    .slide[hidden] {
+      display: none !important;
+    }
+
+    .canvas {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      overflow: hidden;
+      position: relative;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 22px;
+      padding: 42px 48px 36px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(249, 252, 255, 0.9)),
+        var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .canvas::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 9px;
+      background: linear-gradient(180deg, var(--accent, var(--green)), transparent);
+      opacity: 0.72;
+    }
+
+    .topline {
+      position: absolute;
+      top: 16px;
+      left: 48px;
+      right: 48px;
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: center;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .page {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .head {
+      min-width: 0;
+      padding-top: 18px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1,
+    h2 {
+      max-width: 1040px;
+      font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
+      line-height: 1.02;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+
+    h1 {
+      font-size: clamp(52px, 6.2vw, 88px);
+    }
+
+    h2 {
+      font-size: clamp(34px, 4.2vw, 58px);
+    }
+
+    h3 {
+      font-size: 19px;
+      line-height: 1.32;
+      text-wrap: balance;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 22px;
+      line-height: 1.5;
+      text-wrap: pretty;
+    }
+
+    .body {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .hero {
+      grid-template-columns: minmax(0, 1fr) 440px;
+      gap: 42px;
+      align-items: center;
+    }
+
+    .tag {
+      width: fit-content;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border: 1px solid rgba(36, 50, 63, 0.3);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.88);
+      font-size: 14px;
+      color: var(--ink);
+    }
+
+    .tag::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent, var(--green));
+    }
+
+    .hero-device {
+      min-height: 482px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 24px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 20px;
+      overflow: hidden;
+    }
+
+    .voice {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .voice i {
+      display: block;
+      width: 10px;
+      height: var(--h);
+      border-radius: 999px;
+      background: var(--accent, var(--green));
+      opacity: 0.92;
+    }
+
+    .month {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+      align-content: center;
+    }
+
+    .month span {
+      min-width: 0;
+      min-height: 44px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fbff;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .month .busy {
+      background: rgba(100, 185, 158, 0.15);
+      border-color: rgba(100, 185, 158, 0.54);
+      color: #2f7f6b;
+      font-weight: 700;
+    }
+
+    .month .risk {
+      background: rgba(238, 140, 134, 0.15);
+      border-color: rgba(238, 140, 134, 0.54);
+      color: #b65d58;
+      font-weight: 700;
+    }
+
+    .stats,
+    .cols-2,
+    .cols-3,
+    .cols-4,
+    .cols-5 {
+      min-width: 0;
+      display: grid;
+      gap: 16px;
+    }
+
+    .stats,
+    .cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cols-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cols-5 {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .stat {
+      min-width: 0;
+      border-top: 4px solid var(--c, var(--accent, var(--green)));
+      padding-top: 9px;
+    }
+
+    .stat b {
+      display: block;
+      font-size: 30px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .card,
+    .entity,
+    .step,
+    .doc-card,
+    .lane {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--c, var(--accent, var(--green)));
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      padding: 18px;
+      overflow: hidden;
+    }
+
+    .card p,
+    .card li,
+    .entity p,
+    .step p,
+    .doc-card p,
+    .lane p {
+      color: var(--muted);
+      font-size: 16.5px;
+      line-height: 1.46;
+      overflow-wrap: anywhere;
+      text-wrap: pretty;
+    }
+
+    ul {
+      margin: 11px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .big-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 13px;
+    }
+
+    .big-list li {
+      min-width: 0;
+      padding: 15px 18px;
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--c, var(--accent, var(--green)));
+      border-radius: var(--radius);
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 19px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .big-list span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      counter-reset: phase;
+    }
+
+    .phase {
+      min-width: 0;
+      min-height: 190px;
+      position: relative;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      overflow: hidden;
+      counter-increment: phase;
+    }
+
+    .phase::before {
+      content: counter(phase);
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      margin-bottom: 13px;
+      border-radius: 50%;
+      background: var(--c, var(--accent, var(--green)));
+      color: var(--paper);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .phase h3 {
+      margin-bottom: 8px;
+    }
+
+    .phase p {
+      color: var(--muted);
+      font-size: 15.5px;
+      line-height: 1.45;
+      text-wrap: pretty;
+    }
+
+    .doc-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1.35fr;
+      gap: 18px;
+      min-height: 0;
+    }
+
+    .doc-stack {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .doc-card h3 {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+    }
+
+    .doc-card h3 span {
+      color: var(--c, var(--accent, var(--green)));
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .table {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      overflow: hidden;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .key {
+      padding: 13px 16px;
+      background: rgba(100, 185, 158, 0.13);
+      color: #2f7f6b;
+      font-weight: 700;
+    }
+
+    .val {
+      min-width: 0;
+      padding: 13px 16px;
+      color: var(--muted);
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+    }
+
+    .flow {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .node {
+      min-width: 0;
+      min-height: 112px;
+      display: grid;
+      align-content: center;
+      gap: 7px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+
+    .node span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.38;
+      overflow-wrap: anywhere;
+    }
+
+    .layer {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 158px minmax(0, 1fr);
+      min-height: 76px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      overflow: hidden;
+    }
+
+    .layer b {
+      display: grid;
+      place-items: center;
+      padding: 14px;
+      text-align: center;
+      background: var(--c, var(--accent, var(--green)));
+      color: var(--paper);
+    }
+
+    .pills {
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      align-content: center;
+      padding: 15px;
+    }
+
+    .pill {
+      max-width: 100%;
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f7fbff;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .entity,
+    .step {
+      min-height: 126px;
+    }
+
+    .entity h3,
+    .step h3,
+    .doc-card h3 {
+      margin-bottom: 7px;
+      color: #2f7f6b;
+    }
+
+    .step-no {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 12px;
+      border-radius: 50%;
+      background: #e8f6fb;
+      color: var(--ink);
+      border-color: rgba(105, 183, 214, 0.65);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .quote {
+      align-self: end;
+      max-width: 1040px;
+      padding-left: 22px;
+      border-left: 7px solid var(--accent, var(--green));
+      font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
+      font-size: 30px;
+      line-height: 1.28;
+      text-wrap: balance;
+    }
+
+    .quote small {
+      display: block;
+      margin-top: 12px;
+      color: var(--muted);
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      font-size: 18px;
+      line-height: 1.45;
+      text-wrap: pretty;
+    }
+
+    .mono,
+    [translate="no"] {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    .nav {
+      position: fixed;
+      right: max(22px, env(safe-area-inset-right));
+      bottom: max(18px, env(safe-area-inset-bottom));
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+    }
+
+    .nav button {
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--ink);
+      border-radius: 6px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+    }
+
+    .nav button:hover {
+      background: linear-gradient(135deg, var(--teal), var(--green));
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .nav button:focus-visible {
+      outline: 3px solid var(--orange);
+      outline-offset: 3px;
+    }
+
+    .progress {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      z-index: 21;
+      height: 5px;
+      width: 0;
+      background: linear-gradient(90deg, var(--green), var(--teal), var(--orange));
+      transition: width 180ms ease;
+    }
+
+    .sr-status {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+
+    @media (max-width: 1120px) {
+      html,
+      body {
+        overflow: auto;
+      }
+
+      .deck {
+        height: auto;
+        min-height: 100vh;
+      }
+
+      .slide {
+        min-height: 100vh;
+        height: auto;
+        padding: 18px 14px 72px;
+      }
+
+      .canvas {
+        height: auto;
+        min-height: calc(100vh - 92px);
+        overflow: visible;
+        padding: 40px 18px 28px;
+      }
+
+      .topline {
+        left: 18px;
+        right: 18px;
+      }
+
+      h1 {
+        font-size: 44px;
+      }
+
+      h2 {
+        font-size: 34px;
+      }
+
+      .hero,
+      .cols-2,
+      .cols-3,
+      .cols-4,
+      .cols-5,
+      .flow,
+      .timeline,
+      .doc-grid,
+      .doc-stack {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-device {
+        min-height: 420px;
+      }
+
+      .layer {
+        grid-template-columns: 1fr;
+      }
+
+      .row {
+        grid-template-columns: 110px minmax(0, 1fr);
+      }
+    }
+
+    @media print {
+      html,
+      body {
+        overflow: visible;
+        background: white;
+      }
+
+      .deck {
+        height: auto;
+      }
+
+      .slide,
+      .slide[hidden] {
+        display: grid !important;
+        width: 297mm;
+        height: 167mm;
+        page-break-after: always;
+        padding: 8mm;
+      }
+
+      .canvas {
+        box-shadow: none;
+      }
+
+      .nav,
+      .progress,
+      .skip-link,
+      .sr-status {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#slides">跳到幻灯片内容</a>
+  <main class="deck" id="slides">
+    <section class="slide" data-section="项目汇报" style="--accent: var(--green)">
+      <div class="canvas hero">
+        <div class="topline"><span>Voice Calendar AI Native</span><span class="page"></span></div>
+        <div class="head">
+          <span class="tag">AI Native 日历 Web App</span>
+          <h1>语历<br />Vocalendar</h1>
+          <p class="lead">以语音和自然语言为入口，把日程管理、团队协作、提醒通知和 AI 工具调用串成可演示闭环。</p>
+        </div>
+        <div class="hero-device" aria-label="语音日历能力示意">
+          <div class="voice" aria-hidden="true">
+            <i style="--h:18px"></i><i style="--h:42px"></i><i style="--h:26px"></i><i style="--h:56px"></i><i style="--h:34px"></i><i style="--h:64px"></i><i style="--h:23px"></i><i style="--h:46px"></i>
+          </div>
+          <div class="month" aria-hidden="true">
+            <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+            <span></span><span class="busy">评审</span><span></span><span class="busy">周会</span><span></span><span></span><span></span>
+            <span class="risk">冲突</span><span></span><span class="busy">复盘</span><span></span><span></span><span class="busy">演示</span><span></span>
+            <span></span><span></span><span></span><span class="busy">提醒</span><span></span><span></span><span></span>
+          </div>
+          <div class="stats">
+            <div class="stat" style="--c:var(--green)"><b>10</b><span>迁移脚本</span></div>
+            <div class="stat" style="--c:var(--orange)"><b>11</b><span>控制器</span></div>
+            <div class="stat" style="--c:var(--red)"><b>60+</b><span>后端测试点</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="项目目标" style="--accent: var(--teal)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>01 / 项目主要做了什么</span><span class="page"></span></div>
+        <div class="head"><h2>项目目标：用 AI 直接驱动日历操作</h2></div>
+        <div class="body cols-2">
+          <ul class="big-list">
+            <li style="--c:var(--green)">语音与文本双入口<span>浏览器录音上传后端转写，文本输入进入同一套 AI 日历助手流程。</span></li>
+            <li style="--c:var(--orange)">个人与组织空间<span>注册后自动创建个人空间，组织通过邀请码加入，企业空间支持角色和成员管理。</span></li>
+            <li style="--c:var(--red)">日程闭环管理<span>日程创建、编辑、删除、搜索、冲突检测、参与人、企业字段和多视图展示。</span></li>
+          </ul>
+          <ul class="big-list">
+            <li style="--c:var(--teal)">AI 工具调用<span>AI 不直接写库，只能调用预定义工具，支持确认、拒绝、撤销和工具调用日志。</span></li>
+            <li style="--c:var(--green)">提醒与实时通知<span>提醒扫描生成站内通知，通过 WebSocket 推送到在线用户。</span></li>
+            <li style="--c:var(--violet)">可复现交付<span>前后端分离、Flyway 迁移、Docker Compose、本地构建与后端测试命令完整。</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="Vibecoding 流程" style="--accent: var(--violet)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>02 / Vibecoding 工作流</span><span class="page"></span></div>
+        <div class="head">
+          <h2>开发流程</h2>
+          <p class="lead">本项目采用 vibecoding：用 AI 放大开发速度，但先用结构化方法约束目标、边界、接口和验收标准。</p>
+        </div>
+        <div class="body timeline">
+          <div class="phase" style="--c:var(--violet)"><h3>Grill Me</h3><p>先追问场景、用户、边界、非目标、风险动作和演示验收，避免一开始就写偏。</p></div>
+          <div class="phase" style="--c:var(--green)"><h3>文档化</h3><p>沉淀 PRD、TDD、API 接口文档、数据库设计文档、开发语言规范和提交规范。</p></div>
+          <div class="phase" style="--c:var(--teal)"><h3>前端定型</h3><p>用 <span translate="no">web-design-guidelines</span> 检查可访问性、布局、焦点、文案和交互稳定性。</p></div>
+          <div class="phase" style="--c:var(--orange)"><h3>后端实现</h3><p>用 <span translate="no">omc</span> 或 <span translate="no">superpowers</span> 辅助拆模块、写服务、生成 SQL 和实现接口。</p></div>
+          <div class="phase" style="--c:var(--red)"><h3>测试自测</h3><p>让 AI 补齐测试用例，覆盖鉴权、权限、冲突、确认、撤销、提醒和异常分支。</p></div>
+          <div class="phase" style="--c:var(--green)"><h3>快速迭代</h3><p>搭建脚手架后小步提交，用文档和测试约束每轮改动，持续收敛体验。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="文档产出链路" style="--accent: var(--green)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>03 / 从需求澄清到工程资产</span><span class="page"></span></div>
+        <div class="head"><h2>Grill Me 的结果不是聊天记录，而是一组可执行文档</h2></div>
+        <div class="body doc-grid">
+          <div class="card" style="--c:var(--violet)">
+            <h3>边界问题先定下来</h3>
+            <ul>
+              <li>项目做什么、第一版不做什么。</li>
+              <li>谁在什么场景使用，核心路径如何验收。</li>
+              <li>AI 哪些动作可直接执行，哪些必须确认。</li>
+              <li>演示环境、Mock 策略、数据隔离和权限边界。</li>
+            </ul>
+          </div>
+          <div class="doc-stack">
+            <div class="doc-card" style="--c:var(--green)"><h3>PRD <span>产品</span></h3><p>用户痛点、目标用户、核心体验、功能范围、非目标和验收标准。</p></div>
+            <div class="doc-card" style="--c:var(--teal)"><h3>TDD <span>技术</span></h3><p>架构分层、模块拆分、服务边界、错误处理、测试策略和部署方式。</p></div>
+            <div class="doc-card" style="--c:var(--orange)"><h3>API 文档 <span>接口</span></h3><p>Base URL、鉴权、响应格式、错误码、请求响应示例和 WebSocket 约定。</p></div>
+            <div class="doc-card" style="--c:var(--red)"><h3>数据库设计 <span>数据</span></h3><p>用户、空间、组织、日程、AI 会话、提醒、通知和审计日志表。</p></div>
+            <div class="doc-card" style="--c:var(--violet)"><h3>开发规范 <span>协作</span></h3><p>语言风格、分支提交、命名、错误码、测试命名和 PR 粒度。</p></div>
+            <div class="doc-card" style="--c:var(--green)"><h3>迭代清单 <span>执行</span></h3><p>按脚手架、认证、日程、AI、语音、提醒、日志和体验优化切片推进。</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="产品形态" style="--accent: var(--orange)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>04 / 产品形态</span><span class="page"></span></div>
+        <div class="head"><h2>第一屏不是聊天框，而是 AI 日历工作台</h2></div>
+        <div class="body">
+          <div class="cols-3">
+            <div class="card" style="--c:var(--green)"><h3>左侧：AI 助手</h3><p>承接语音、文本、会话历史、确认卡片、工具调用结果和语音播放。</p></div>
+            <div class="card" style="--c:var(--orange)"><h3>中间：日历主视图</h3><p>支持月历、列表、表格、甘特视图，围绕日程查看与编辑展开。</p></div>
+            <div class="card" style="--c:var(--red)"><h3>右侧：洞察与提醒</h3><p>展示当天安排、未来重点日程、冲突洞察、通知中心和近期操作。</p></div>
+          </div>
+          <div class="flow">
+            <div class="node"><b>用户表达</b><span>“明天下午三点安排产品评审”</span></div>
+            <div class="node"><b>语音转写</b><span>STT 或 Mock 流程生成文本</span></div>
+            <div class="node"><b>AI 理解</b><span>抽取时间、参与人、动作和风险</span></div>
+            <div class="node"><b>工具执行</b><span>调用 createEvent / searchEvents 等工具</span></div>
+            <div class="node"><b>可解释反馈</b><span>返回结果、冲突提示、确认与撤销入口</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="技术选型" style="--accent: var(--teal)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>05 / 技术选型</span><span class="page"></span></div>
+        <div class="head"><h2>技术栈选择偏“可演示、可验证、易扩展”</h2></div>
+        <div class="body cols-2">
+          <div class="table">
+            <div class="row"><div class="key">前端</div><div class="val">Vue 3、TypeScript、Vite、Vue Router、Element Plus</div></div>
+            <div class="row"><div class="key">后端</div><div class="val">Java 17、Spring Boot 3.3、Spring Web、Spring Security、WebSocket</div></div>
+            <div class="row"><div class="key">数据访问</div><div class="val">Spring JDBC，显式 SQL，便于控制复杂查询和权限过滤。</div></div>
+            <div class="row"><div class="key">数据库</div><div class="val">MySQL 8.x，Flyway 管理用户、日程、AI、提醒、语音等表结构。</div></div>
+            <div class="row"><div class="key">AI/语音</div><div class="val">OpenAI-compatible、Ollama、Mock 客户端，由后端统一适配。</div></div>
+            <div class="row"><div class="key">交付</div><div class="val">Maven、npm、Docker Compose，支持本地启动和容器化演示。</div></div>
+          </div>
+          <div class="body">
+            <div class="card" style="--c:var(--green)"><h3>模型不由前端直连</h3><p>密钥、权限、确认、日志都需要后端统一控制。</p></div>
+            <div class="card" style="--c:var(--orange)"><h3>保留 Mock 能力</h3><p>AI、STT、TTS 服务可能受网络影响，Mock 让演示和测试更稳定。</p></div>
+            <div class="card" style="--c:var(--teal)"><h3>使用 Flyway</h3><p>数据库结构可从空库复现，评审和部署更可靠。</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="总体架构" style="--accent: var(--green)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>06 / 总体架构</span><span class="page"></span></div>
+        <div class="head"><h2>分层架构：前端体验、后端编排、受控工具、持久化</h2></div>
+        <div class="body">
+          <div class="layer" style="--c:var(--green)"><b>前端交互层</b><div class="pills"><span class="pill">登录注册</span><span class="pill">日历工作台</span><span class="pill">AI 对话</span><span class="pill">语音录制</span><span class="pill">通知中心</span><span class="pill">操作日志</span></div></div>
+          <div class="layer" style="--c:var(--orange)"><b>API 与安全层</b><div class="pills"><span class="pill">Spring MVC</span><span class="pill">JWT Filter</span><span class="pill">统一响应</span><span class="pill">参数校验</span><span class="pill">全局异常处理</span></div></div>
+          <div class="layer" style="--c:var(--red)"><b>业务服务层</b><div class="pills"><span class="pill">AuthService</span><span class="pill">EventService</span><span class="pill">OrganizationService</span><span class="pill">ReminderService</span><span class="pill">AiService</span><span class="pill">Speech / TTS</span></div></div>
+          <div class="layer" style="--c:var(--teal)"><b>基础设施层</b><div class="pills"><span class="pill">Spring JDBC</span><span class="pill">MySQL</span><span class="pill">Flyway</span><span class="pill">SSE</span><span class="pill">WebSocket</span><span class="pill">OpenAI-compatible Client</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="AI Agent" style="--accent: var(--red)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>07 / AI Agent 设计</span><span class="page"></span></div>
+        <div class="head"><h2>AI 只能通过“受控工具层”改变系统状态</h2></div>
+        <div class="body">
+          <div class="cols-2">
+            <div class="card" style="--c:var(--green)"><h3>工具注册与执行</h3><ul><li><span class="mono">ToolRegistry</span> 统一管理工具定义。</li><li>工具包括查询、搜索、创建、更新、删除日程，冲突检测和提醒操作。</li><li>执行时注入当前用户和空间上下文。</li></ul></div>
+            <div class="card" style="--c:var(--red)"><h3>风险确认机制</h3><ul><li>删除、批量、跨空间、影响他人事件会升为高风险。</li><li>高风险动作先生成待确认记录。</li><li>最近一次 AI 操作支持撤销。</li></ul></div>
+          </div>
+          <div class="quote">AI 不是“会聊天的表单”，而是带权限、日志、确认和回滚边界的操作入口。<small>项目最核心的 AI Native 设计：让 AI 可以做事，但不能绕过业务规则。</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="数据设计" style="--accent: var(--teal)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>08 / 数据设计</span><span class="page"></span></div>
+        <div class="head"><h2>数据模型围绕空间隔离、协作、AI 可追溯展开</h2></div>
+        <div class="body cols-4">
+          <div class="entity"><h3>用户与空间</h3><p>users、calendar_spaces：个人空间和企业空间的数据隔离基础。</p></div>
+          <div class="entity"><h3>组织协作</h3><p>organizations、organization_members：邀请码、Owner/Admin/Member 角色。</p></div>
+          <div class="entity"><h3>日程核心</h3><p>calendar_events、event_participants：时间、参与人、企业字段。</p></div>
+          <div class="entity"><h3>提醒通知</h3><p>event_reminders、notifications：提醒扫描、站内消息、已读未读。</p></div>
+          <div class="entity"><h3>AI 会话</h3><p>ai_conversations、ai_messages：会话、消息、结构化结果。</p></div>
+          <div class="entity"><h3>AI 任务</h3><p>ai_task_states、pending_confirmations：确认卡片和撤销链路。</p></div>
+          <div class="entity"><h3>审计日志</h3><p>operation_logs、ai_tool_call_logs：人工操作和 AI 工具调用可追踪。</p></div>
+          <div class="entity"><h3>语音能力</h3><p>speech_transcriptions、tts_cache：转写结果和 TTS 缓存元数据。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="后端模块" style="--accent: var(--orange)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>09 / 后端模块</span><span class="page"></span></div>
+        <div class="head"><h2>后端模块已经覆盖完整业务闭环</h2></div>
+        <div class="body cols-3">
+          <div class="card" style="--c:var(--green)"><h3>身份与权限</h3><p>注册登录、BCrypt 密码、JWT 签发、认证过滤器、当前用户上下文。</p></div>
+          <div class="card" style="--c:var(--orange)"><h3>空间与组织</h3><p>个人空间自动创建，组织创建、邀请码加入、成员列表、角色调整。</p></div>
+          <div class="card" style="--c:var(--teal)"><h3>日程与冲突</h3><p>日程 CRUD、搜索筛选、参与人、企业字段、冲突检测、操作日志。</p></div>
+          <div class="card" style="--c:var(--red)"><h3>AI 编排</h3><p>会话、消息、工具调用、风险评估、确认流程、撤销、SSE 流式接口。</p></div>
+          <div class="card" style="--c:var(--violet)"><h3>提醒通知</h3><p>提醒创建、取消、稍后提醒、定时扫描、通知生成、WebSocket 推送。</p></div>
+          <div class="card" style="--c:var(--orange)"><h3>语音与 TTS</h3><p>语音转写、语音对话、TTS 合成、音频缓存和多客户端适配。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="前端设计" style="--accent: var(--violet)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>10 / 前端设计与 Guidelines</span><span class="page"></span></div>
+        <div class="head"><h2>前端围绕“高频操作工作台”组织页面</h2></div>
+        <div class="body cols-2">
+          <div class="card" style="--c:var(--green)"><h3>页面路由</h3><ul><li><span class="mono">/</span> 首页仪表盘</li><li><span class="mono">/calendar</span> 日历主工作台</li><li><span class="mono">/ai-chat</span> AI 对话</li><li><span class="mono">/notifications</span> 提醒中心</li><li><span class="mono">/operation-logs</span> 操作日志</li><li><span class="mono">/settings</span> 设置</li></ul></div>
+          <div class="card" style="--c:var(--violet)"><h3>设计自检</h3><ul><li>使用语义化 <span translate="no">main</span>、<span translate="no">section</span> 和 <span translate="no">nav</span>。</li><li>按钮有 <span translate="no">aria-label</span>，键盘可左右切页。</li><li>提供可见焦点、减少动画适配和移动端防横向溢出。</li><li>文本容器允许换行，长路径和技术名不会撑破布局。</li><li>页码、进度条和屏幕阅读器状态同步更新。</li></ul></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="AI 协作开发" style="--accent: var(--green)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>11 / AI 协作开发方式</span><span class="page"></span></div>
+        <div class="head"><h2>搭好脚手架后，用测试和自测驱动快速迭代</h2></div>
+        <div class="body cols-3">
+          <div class="lane" style="--c:var(--violet)"><h3>需求侧</h3><p>Grill Me 持续追问，避免把“想法”直接变成代码；每轮改动都回到边界、验收和非目标。</p></div>
+          <div class="lane" style="--c:var(--teal)"><h3>前端侧</h3><p>AI 生成工作台和交互后，用 web-design-guidelines 检查可访问性、文案、焦点和响应式问题。</p></div>
+          <div class="lane" style="--c:var(--orange)"><h3>后端侧</h3><p>用 omc / superpowers 辅助服务拆分、接口实现、SQL 编写、异常处理和权限校验。</p></div>
+          <div class="lane" style="--c:var(--red)"><h3>测试侧</h3><p>让 AI 写控制器测试、服务边界测试和异常分支测试，再运行自测修复失败用例。</p></div>
+          <div class="lane" style="--c:var(--green)"><h3>集成侧</h3><p>通过 README、Docker Compose、Flyway 和 Mock 客户端保证演示环境可复现。</p></div>
+          <div class="lane" style="--c:var(--violet)"><h3>迭代侧</h3><p>每次只推进一个可验证切片：登录、空间、日程、AI 工具、语音、提醒、日志、体验优化。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="当前不足" style="--accent: var(--red)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>12 / 当前不足</span><span class="page"></span></div>
+        <div class="head"><h2>当前版本更偏“完整原型”，离生产级还有距离</h2></div>
+        <div class="body cols-3">
+          <div class="card" style="--c:var(--red)"><h3>扩展性不足</h3><p>提醒扫描、WebSocket 会话、TTS 音频缓存主要依赖单机内存。</p></div>
+          <div class="card" style="--c:var(--orange)"><h3>AI 稳定性不足</h3><p>复杂自然语言、多人同名、重复日程和批量改期仍需更强追问与评估。</p></div>
+          <div class="card" style="--c:var(--green)"><h3>数据能力不足</h3><p>没有全文检索、向量记忆、长期用户偏好、统计报表和 token 成本追踪。</p></div>
+          <div class="card" style="--c:var(--teal)"><h3>工程保障不足</h3><p>后端测试较完整，但前端缺少单元测试、组件测试和端到端回归。</p></div>
+          <div class="card" style="--c:var(--red)"><h3>安全治理不足</h3><p>JWT 缺少刷新令牌、主动注销黑名单、接口限流和模型调用限额。</p></div>
+          <div class="card" style="--c:var(--violet)"><h3>生态集成不足</h3><p>尚未接入第三方日历、企业 IM、邮件、短信、对象存储和生产监控。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="Redis 改进方向" style="--accent: var(--green)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>13 / Redis 改进方向</span><span class="page"></span></div>
+        <div class="head"><h2>改进方向：引入 Redis，先解决状态共享和高频访问</h2></div>
+        <div class="body cols-2">
+          <div class="card" style="--c:var(--green)"><h3>优先落地能力</h3><ul><li>缓存用户会话、当前用户信息、空间成员权限和组织角色。</li><li>用 token 黑名单实现 JWT 主动注销和风险封禁。</li><li>用 ZSET 管理待触发提醒，减少数据库轮询压力。</li><li>用分布式锁保护提醒触发、AI 确认执行和重复提交。</li><li>用 Pub/Sub 或 Stream 广播通知事件，支撑多实例 WebSocket。</li></ul></div>
+          <div class="card" style="--c:var(--orange)"><h3>推荐演进顺序</h3><ul><li>Spring Cache + Redis 缓存权限和空间列表。</li><li>Redis ZSET 替换单机提醒扫描队列。</li><li>Redis Stream 承接通知、AI 工具日志和异步任务。</li><li>接入限流、幂等键、分布式锁和 Token 黑名单。</li><li>TTS 音频迁移到对象存储，Redis 只存索引和短期状态。</li></ul></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-section="后续路线图" style="--accent: var(--teal)" hidden>
+      <div class="canvas">
+        <div class="topline"><span>14 / 后续路线图</span><span class="page"></span></div>
+        <div class="head"><h2>下一阶段：从演示闭环走向可运营产品</h2></div>
+        <div class="body">
+          <div class="cols-4">
+            <div class="step"><div class="step-no">1</div><h3>可靠性</h3><p>Redis、消息队列、任务幂等、服务监控、错误追踪、前端 E2E 测试。</p></div>
+            <div class="step"><div class="step-no">2</div><h3>AI 能力</h3><p>追问策略、复杂时间解析、重复日程展开、工具调用评测集、用户偏好记忆。</p></div>
+            <div class="step"><div class="step-no">3</div><h3>协作生态</h3><p>接入飞书、钉钉、企业微信、Google / Outlook 日历、邮件和短信提醒。</p></div>
+            <div class="step"><div class="step-no">4</div><h3>商业化能力</h3><p>组织配额、模型成本统计、成员活跃度、审计报表、权限策略模板。</p></div>
+          </div>
+          <div class="quote">项目的价值不在于“又做了一个日历”，而在于把 AI 操作边界、协作权限和审计链路一起做进了日历。</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="幻灯片导航">
+    <button type="button" id="prev" aria-label="上一页">‹</button>
+    <button type="button" id="next" aria-label="下一页">›</button>
+  </nav>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <div class="sr-status" id="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const progress = document.querySelector("#progress");
+      const status = document.querySelector("#status");
+      let current = 0;
+
+      function formatPage(index) {
+        const page = new Intl.NumberFormat("zh-CN", {
+          minimumIntegerDigits: 2,
+          useGrouping: false
+        }).format(index + 1);
+        const total = new Intl.NumberFormat("zh-CN", {
+          minimumIntegerDigits: 2,
+          useGrouping: false
+        }).format(slides.length);
+        return `${page} / ${total}`;
+      }
+
+      function show(index) {
+        current = Math.max(0, Math.min(slides.length - 1, index));
+        slides.forEach((slide, i) => {
+          slide.hidden = i !== current;
+          const page = slide.querySelector(".page");
+          if (page) page.textContent = formatPage(i);
+        });
+        progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+        const section = slides[current].dataset.section || "幻灯片";
+        document.title = `语音日历 AI Native 项目汇报 (${formatPage(current)})`;
+        status.textContent = `当前页：${section}，${formatPage(current)}`;
+      }
+
+      document.querySelector("#prev").addEventListener("click", () => show(current - 1));
+      document.querySelector("#next").addEventListener("click", () => show(current + 1));
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+          event.preventDefault();
+          show(current + 1);
+        }
+        if (event.key === "ArrowLeft" || event.key === "PageUp") {
+          event.preventDefault();
+          show(current - 1);
+        }
+        if (event.key === "Home") show(0);
+        if (event.key === "End") show(slides.length - 1);
+      });
+
+      show(0);
+    })();
+  </script>
+</body>
+</html>
