@@ -30,6 +30,7 @@
       @edit="openEditDialog"
       @drop-calendar="moveEventToDate"
       @change-view="viewMode = $event"
+      @set-month="setMonth"
       @update-filter="updateFilter"
       @load="loadEvents"
     />
@@ -342,6 +343,10 @@ function shiftMonth(offset: number) {
   const next = new Date(monthCursor.value)
   next.setMonth(next.getMonth() + offset)
   monthCursor.value = startOfMonth(next)
+}
+
+function setMonth(date: Date) {
+  monthCursor.value = startOfMonth(date)
 }
 
 function goToday() {

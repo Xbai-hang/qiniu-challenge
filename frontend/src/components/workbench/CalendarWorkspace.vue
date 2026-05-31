@@ -99,45 +99,141 @@
 
     <div v-if="isLoading" class="workspace-loading">正在加载日历事件…</div>
 
-    <div v-show="viewMode === 'month'" class="month-view" aria-label="月历视图">
-      <div class="weekday-row">
-        <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
-      </div>
-      <div class="month-grid">
-        <div
-          v-for="day in monthDays"
-          :key="day.key"
-          role="button"
-          tabindex="0"
-          :style="day.columnStart ? { gridColumnStart: String(day.columnStart) } : undefined"
-          :class="[
-            'month-cell',
-            sameDay(day.date, selectedDate) ? 'is-selected' : '',
-          ]"
-          @click="$emit('select-date', day.date)"
-          @keydown.enter="$emit('select-date', day.date)"
-          @keydown.space.prevent="$emit('select-date', day.date)"
-          @dragover.prevent
-          @drop="dropOnDate(day.date)"
-        >
-          <span class="day-number">{{ day.date.getDate() }}</span>
-          <span class="day-load">{{ eventsByDay.get(day.key)?.length ?? 0 }}</span>
-          <span class="month-event-stack">
-            <button
-              v-for="event in (eventsByDay.get(day.key) ?? []).slice(0, 3)"
-              :key="event.id"
-              type="button"
-              draggable="true"
-              :class="['month-event-block', conflictIds.has(event.id) ? 'has-conflict' : '']"
-              @click.stop="$emit('edit', event)"
-              @dragstart.stop="dragEventId = event.id"
-              @dragend="dragEventId = null"
-            >
-              {{ event.title }}
-            </button>
-          </span>
+    <div
+      v-show="viewMode === 'month'"
+      :class="['month-focus-layout', dayFocusCollapsed ? 'is-focus-collapsed' : '']"
+      aria-label="月历视图"
+    >
+      <div class="month-view">
+        <div class="weekday-row">
+          <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
+        </div>
+        <div class="month-grid">
+          <div
+            v-for="day in monthDays"
+            :key="day.key"
+            role="button"
+            tabindex="0"
+            :style="day.columnStart ? { gridColumnStart: String(day.columnStart) } : undefined"
+            :class="[
+              'month-cell',
+              sameDay(day.date, selectedDate) ? 'is-selected' : '',
+            ]"
+            @click="selectCalendarDate(day.date)"
+            @keydown.enter="selectCalendarDate(day.date)"
+            @keydown.space.prevent="selectCalendarDate(day.date)"
+            @dragover.prevent
+            @drop="dropOnDate(day.date)"
+          >
+            <span class="day-number">{{ day.date.getDate() }}</span>
+            <span class="day-load">{{ eventsByDay.get(day.key)?.length ?? 0 }}</span>
+            <span class="month-event-stack">
+              <button
+                v-for="event in (eventsByDay.get(day.key) ?? []).slice(0, 3)"
+                :key="event.id"
+                type="button"
+                draggable="true"
+                :class="['month-event-block', conflictIds.has(event.id) ? 'has-conflict' : '']"
+                @click.stop="$emit('edit', event)"
+                @dragstart.stop="dragEventId = event.id"
+                @dragend="dragEventId = null"
+              >
+                {{ event.title }}
+              </button>
+            </span>
+          </div>
         </div>
       </div>
+
+      <aside :class="['day-focus-panel', dayFocusCollapsed ? 'is-collapsed' : '']" aria-label="选中日期安排">
+        <button
+          type="button"
+          class="day-focus-toggle"
+          :aria-expanded="!dayFocusCollapsed"
+          :aria-label="dayFocusCollapsed ? '显示日程面板' : '隐藏日程面板'"
+          :title="dayFocusCollapsed ? '显示日程面板' : '隐藏日程面板'"
+          @click="dayFocusCollapsed = !dayFocusCollapsed"
+        >
+          <ArrowRight v-if="!dayFocusCollapsed" />
+          <ArrowLeft v-else />
+        </button>
+
+        <button
+          v-if="dayFocusCollapsed"
+          type="button"
+          class="day-focus-collapsed-card"
+          aria-label="显示选中日期安排"
+          @click="dayFocusCollapsed = false"
+          @dragover.prevent
+          @drop="dropOnDate(selectedDate)"
+        >
+          <span>{{ selectedDateWeekday }}</span>
+          <strong>{{ selectedDateDayNumber }}</strong>
+          <small>{{ selectedDateEvents.length }}</small>
+        </button>
+
+        <section v-if="!dayFocusCollapsed" class="mini-month-card" aria-labelledby="mini-month-title">
+          <div class="mini-month-header">
+            <strong id="mini-month-title">{{ miniMonthLabel }}</strong>
+            <span>{{ selectedDateEvents.length }} 项</span>
+          </div>
+          <div class="mini-weekday-row">
+            <span v-for="weekday in miniWeekdays" :key="weekday">{{ weekday }}</span>
+          </div>
+          <div class="mini-month-grid">
+            <button
+              v-for="day in miniMonthDays"
+              :key="day.key"
+              type="button"
+              :class="[
+                'mini-day',
+                day.isCurrentMonth ? '' : 'is-muted',
+                sameDay(day.date, selectedDate) ? 'is-selected' : '',
+                eventsByDay.get(day.key)?.length ? 'has-events' : '',
+              ]"
+              @click="selectCalendarDate(day.date)"
+              @dragover.prevent
+              @drop="dropOnDate(day.date)"
+            >
+              {{ day.date.getDate() }}
+            </button>
+          </div>
+        </section>
+
+        <section v-if="!dayFocusCollapsed" class="day-timeline-card" aria-labelledby="day-timeline-title">
+          <div class="day-timeline-header">
+            <div>
+              <span>{{ selectedDateWeekday }}</span>
+              <strong id="day-timeline-title">{{ selectedDateDayNumber }}</strong>
+            </div>
+            <p>{{ selectedDateLabel }}</p>
+          </div>
+          <div class="day-timeline-scroll">
+            <div class="day-now-marker" v-if="showNowMarker" :style="{ top: `${nowMarkerOffset}px` }">
+              <span></span>
+            </div>
+            <div v-for="hour in dayHours" :key="hour" class="timeline-hour">
+              <span class="timeline-hour-label">{{ formatHour(hour) }}</span>
+              <div class="timeline-hour-track">
+                <button
+                  v-for="event in eventsForHour(hour)"
+                  :key="event.id"
+                  type="button"
+                  draggable="true"
+                  :class="['timeline-event', conflictIds.has(event.id) ? 'has-conflict' : '']"
+                  @click="$emit('edit', event)"
+                  @dragstart.stop="dragEventId = event.id"
+                  @dragend="dragEventId = null"
+                >
+                  <strong>{{ event.title }}</strong>
+                  <span>{{ formatTimeRange(event.startTime, event.endTime) }}</span>
+                </button>
+              </div>
+            </div>
+            <div v-if="selectedDateEvents.length === 0" class="timeline-empty">这一天没有事件。</div>
+          </div>
+        </section>
+      </aside>
     </div>
 
     <div v-show="viewMode === 'list'" class="agenda-view" aria-label="日程列表视图">
@@ -305,12 +401,17 @@ const emit = defineEmits<{
   edit: [event: CalendarEvent]
   'drop-calendar': [eventId: number, date: Date]
   'change-view': [mode: WorkspaceViewMode]
+  'set-month': [date: Date]
   'update-filter': [key: keyof WorkspaceFilters, value: string]
   load: []
 }>()
 
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
+const miniWeekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const dayHours = Array.from({ length: 24 }, (_, index) => index)
+const timelineHourHeight = 48
 const dragEventId = ref<number | null>(null)
+const dayFocusCollapsed = ref(false)
 
 const viewModes = [
   { value: 'month' as const, label: '月历', icon: Calendar },
@@ -341,6 +442,10 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 })
 
 const monthLabel = computed(() => monthFormatter.format(props.monthCursor))
+const miniMonthLabel = computed(() => {
+  const month = new Intl.DateTimeFormat('en-US', { month: 'short' }).format(props.monthCursor)
+  return `${month} ${props.monthCursor.getFullYear()}`
+})
 
 const monthDays = computed(() => {
   const year = props.monthCursor.getFullYear()
@@ -359,6 +464,24 @@ const monthDays = computed(() => {
   })
 })
 
+const miniMonthDays = computed(() => {
+  const year = props.monthCursor.getFullYear()
+  const month = props.monthCursor.getMonth()
+  const firstDate = new Date(year, month, 1)
+  const gridStart = new Date(firstDate)
+  gridStart.setDate(firstDate.getDate() - firstDate.getDay())
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart)
+    date.setDate(gridStart.getDate() + index)
+    return {
+      date,
+      key: dateKey(date),
+      isCurrentMonth: date.getMonth() === month,
+    }
+  })
+})
+
 const eventsByDay = computed(() => {
   const map = new Map<string, CalendarEvent[]>()
   props.events.forEach((event) => {
@@ -371,10 +494,21 @@ const eventsByDay = computed(() => {
 })
 
 const selectedDateEvents = computed(() =>
-  props.events.filter((event) => sameDay(new Date(event.startTime), props.selectedDate)),
+  props.events
+    .filter((event) => sameDay(new Date(event.startTime), props.selectedDate))
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()),
 )
 
 const selectedDateLabel = computed(() => fullDateFormatter.format(props.selectedDate))
+const selectedDateWeekday = computed(() =>
+  new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(props.selectedDate).toUpperCase(),
+)
+const selectedDateDayNumber = computed(() => props.selectedDate.getDate())
+const showNowMarker = computed(() => sameDay(new Date(), props.selectedDate))
+const nowMarkerOffset = computed(() => {
+  const now = new Date()
+  return ((now.getHours() * 60 + now.getMinutes()) / 60) * timelineHourHeight
+})
 
 const futureEvents = computed(() => {
   const start = startOfDay(props.selectedDate).getTime()
@@ -423,11 +557,25 @@ function updateFilter(key: keyof WorkspaceFilters, value: string) {
   emit('update-filter', key, value)
 }
 
+function selectCalendarDate(date: Date) {
+  emit('select-date', date)
+  if (date.getFullYear() !== props.monthCursor.getFullYear() || date.getMonth() !== props.monthCursor.getMonth()) {
+    emit('set-month', date)
+  }
+}
+
 function dropOnDate(date: Date) {
   if (dragEventId.value) {
     emit('drop-calendar', dragEventId.value, date)
     dragEventId.value = null
   }
+}
+
+function eventsForHour(hour: number) {
+  return selectedDateEvents.value.filter((event) => {
+    const start = new Date(event.startTime)
+    return event.allDay ? hour === 0 : start.getHours() === hour
+  })
 }
 
 function ganttStyle(event: CalendarEvent) {
@@ -470,6 +618,16 @@ function formatTime(value: string) {
 
 function formatTimeRange(start: string, end: string) {
   return `${formatTime(start)} - ${formatTime(end)}`
+}
+
+function formatHour(hour: number) {
+  if (hour === 0) {
+    return '12 AM'
+  }
+  if (hour === 12) {
+    return '12 PM'
+  }
+  return hour > 12 ? `${hour - 12} PM` : `${hour} AM`
 }
 
 function statusLabel(status: string) {
