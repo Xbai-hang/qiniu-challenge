@@ -2,6 +2,15 @@
 
 语历 是一个以语音和自然语言为入口的智能日历管理 Web App。项目支持个人/组织日历空间、日程管理、AI 助手、语音输入、提醒通知、操作日志和企业协作字段，适合作为 AI Native 日历产品原型或课程/挑战赛项目基础。
 
+## 相关信息
+
+> 七牛云 x XEngineer 暑期实训营 2026/02/29 第二批次【赛题一】
+
+- 队伍名称：木子木子
+- 项目仓库：[https://github.com/Xbai-hang/qiniu-challenge](#)
+- 演示视频：[demo.mp4](https://r2.sparyn.tech/qiniu-challenge-demo.mp4)
+- 演示站点：[语历](http://129.204.44.74:5173)
+
 ## 技术栈
 
 | 模块 | 技术/工具 | 说明 |
@@ -267,6 +276,3 @@ docker compose config
 
 更完整的接口说明见 [docs/API接口文档.md](docs/API接口文档.md)。
 
----
-
-项目演示链接：http://r2.sparyn.tech/qiniu-challenge-demo.mp4
