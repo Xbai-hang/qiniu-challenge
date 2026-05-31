@@ -126,6 +126,13 @@ export function getAiConversationMessages(
   })
 }
 
+export function deleteAiConversation(conversationId: number, options: Pick<RequestOptions, 'showErrorMessage'> = {}) {
+  return request<void>(`/ai/conversations/${conversationId}`, {
+    method: 'DELETE',
+    showErrorMessage: options.showErrorMessage,
+  })
+}
+
 export function getPendingConfirmations(options: Pick<RequestOptions, 'showErrorMessage'> = {}) {
   return request<PendingConfirmation[]>('/ai/confirmations', {
     showErrorMessage: options.showErrorMessage,

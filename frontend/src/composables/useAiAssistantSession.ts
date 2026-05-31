@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   confirmPendingAction,
+  deleteAiConversation,
   getAiConversationMessages,
   getAiConversations,
   getPendingConfirmations,
@@ -82,6 +83,9 @@ export function useAiAssistantSession() {
       refreshCalendarIfNeeded()
       void loadConversations()
     } catch (error) {
+      state.lastToolCalls = []
+      state.pendingConfirmations = []
+      state.canUndo = false
       ElMessage.error(error instanceof Error ? error.message : 'AI 请求失败')
     } finally {
       state.isSending = false
@@ -96,12 +100,17 @@ export function useAiAssistantSession() {
 
   async function sendQuickAction(action: string) {
     const prompts: Record<string, string> = {
-      创建日程: '明天下午三点安排项目复盘',
-      查询日程: '今天有什么安排？',
+      创建日程: '请帮我创建日程：',
+      查询日程: '请帮我查询日程：',
       检查冲突: '检查我今天的日程冲突',
       推荐时间: '帮我推荐一个明天下午开会的时间',
     }
-    await sendMessage(prompts[action] ?? action)
+    const prompt = prompts[action] ?? action
+    if (action === '创建日程' || action === '查询日程') {
+      draft.value = prompt
+      return
+    }
+    await sendMessage(prompt)
   }
 
   async function loadConversations() {
@@ -128,6 +137,19 @@ export function useAiAssistantSession() {
         .map(toChatMessage)
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '会话消息加载失败')
+    }
+  }
+
+  async function deleteConversation(conversationId: number) {
+    try {
+      await deleteAiConversation(conversationId, { showErrorMessage: false })
+      state.conversations = state.conversations.filter((conversation) => conversation.id !== conversationId)
+      if (state.conversationId === conversationId) {
+        startNewConversation()
+      }
+      ElMessage.success('会话记录已删除')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '删除会话失败')
     }
   }
 
@@ -196,6 +218,7 @@ export function useAiAssistantSession() {
     sendQuickAction,
     loadConversations,
     selectConversation,
+    deleteConversation,
     startNewConversation,
     confirmConfirmation,
     rejectConfirmation,

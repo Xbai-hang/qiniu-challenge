@@ -11,6 +11,8 @@ public interface AiRepository {
 
     List<AiConversation> findConversations(long userId);
 
+    boolean deleteConversation(long conversationId, long userId);
+
     long createMessage(CreateAiMessageCommand command);
 
     List<AiMessage> findMessages(long conversationId, long userId);

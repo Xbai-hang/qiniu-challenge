@@ -179,7 +179,7 @@ function isApiResponse<T>(payload: unknown): payload is ApiResponse<T> {
   }
 
   if (payload.success) {
-    return 'data' in payload
+    return true
   }
 
   return isRecord(payload.error) && typeof payload.error.code === 'string'
@@ -207,4 +207,3 @@ function toApiClientError(error: unknown) {
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null
 }
-
