@@ -151,8 +151,22 @@ public class JdbcAiRepository implements AiRepository {
                 SELECT *
                 FROM ai_conversations
                 WHERE user_id = ?
+                  AND status = 'active'
                 ORDER BY updated_at DESC, id DESC
                 """, conversationRowMapper, userId);
+    }
+
+    @Override
+    public boolean deleteConversation(long conversationId, long userId) {
+        int updated = jdbcTemplate.update("""
+                UPDATE ai_conversations
+                SET status = 'deleted',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND user_id = ?
+                  AND status = 'active'
+                """, conversationId, userId);
+        return updated > 0;
     }
 
     @Override
@@ -201,6 +215,7 @@ public class JdbcAiRepository implements AiRepository {
                 JOIN ai_conversations c ON c.id = m.conversation_id
                 WHERE m.conversation_id = ?
                   AND c.user_id = ?
+                  AND c.status = 'active'
                 ORDER BY m.created_at ASC, m.id ASC
                 """, messageRowMapper, conversationId, userId);
     }

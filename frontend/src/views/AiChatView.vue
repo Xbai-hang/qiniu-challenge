@@ -18,17 +18,20 @@
 
       <div class="ai-chat-history-list">
         <div v-if="ai.state.isLoadingHistory" class="ai-chat-empty">正在加载历史会话</div>
-        <button
+        <div
           v-for="conversation in ai.state.conversations"
           v-else
           :key="conversation.id"
-          type="button"
           :class="['ai-chat-history-item', ai.state.conversationId === conversation.id ? 'active' : '']"
-          @click="ai.selectConversation(conversation.id)"
         >
-          <strong>{{ conversation.title || 'AI 对话' }}</strong>
-          <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
-        </button>
+          <button type="button" class="ai-history-select" @click="ai.selectConversation(conversation.id)">
+            <strong>{{ conversation.title || 'AI 对话' }}</strong>
+            <span>{{ formatConversationTime(conversation.updatedAt) }}</span>
+          </button>
+          <button type="button" class="ai-history-delete" aria-label="删除会话" @click="ai.deleteConversation(conversation.id)">
+            <Delete />
+          </button>
+        </div>
       </div>
     </section>
 
@@ -105,7 +108,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import { Delete, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
 import { useAiAssistantSession } from '../composables/useAiAssistantSession'
 import { useWorkspaceStore } from '../stores/workspace'
 

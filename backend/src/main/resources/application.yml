@@ -24,10 +24,10 @@ app:
     jwt-secret: ${JWT_SECRET:qiniu-challenge-dev-secret-change-me}
     access-token-ttl-seconds: ${ACCESS_TOKEN_TTL_SECONDS:86400}
   ai:
-    provider: ${AI_PROVIDER:mock}
+    provider: ${AI_PROVIDER:openai-compatible}
     base-url: ${AI_BASE_URL:}
     api-key: ${AI_API_KEY:}
-    model: ${AI_MODEL:mock}
+    model: ${AI_MODEL:}
     timeout-seconds: ${AI_TIMEOUT_SECONDS:30}
     temperature: ${AI_TEMPERATURE:0.2}
     prompt-version: ${AI_PROMPT_VERSION:prompt-v1}

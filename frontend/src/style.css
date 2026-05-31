@@ -105,7 +105,9 @@
 .assistant-history-item,
 .global-ai-history-item {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 10px 12px;
   border: 0;
@@ -114,6 +116,47 @@
   color: var(--text-primary);
   background: rgba(248, 250, 252, 0.88);
   cursor: pointer;
+}
+
+.ai-history-select {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ai-history-select strong,
+.ai-history-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-history-delete {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ai-history-delete:hover {
+  color: #b91c1c;
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.ai-history-delete svg {
+  width: 16px;
+  height: 16px;
 }
 
 .assistant-history-item.active,
@@ -536,7 +579,9 @@
 
 .ai-chat-history-item {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 12px 14px;
   border: 0;

@@ -5,10 +5,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.ai")
 public class AiProperties {
 
-    private String provider = "mock";
+    private String provider = "openai-compatible";
     private String baseUrl;
     private String apiKey;
-    private String model = "mock";
+    private String model = "";
     private int timeoutSeconds = 30;
     private double temperature = 0.2;
     private String promptVersion = "prompt-v1";
