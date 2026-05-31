@@ -53,15 +53,40 @@
           <strong>你好，我是你的 AI 日历助手</strong>
           <span>需要我帮你安排或查询日程吗？</span>
         </div>
-        <div v-for="message in ai.state.messages" :key="message.id" :class="['global-ai-message', message.role]">
-          <p>{{ message.content }}</p>
-        </div>
+        <AiVoiceMessage
+          v-for="message in ai.state.messages"
+          :key="message.id"
+          :message="message"
+          :preparing-message-id="ai.state.preparingSpeechMessageId"
+          :speaking-message-id="ai.state.speakingMessageId"
+          @play-user="ai.playUserVoice"
+          @play-assistant="ai.playAssistantMessage"
+          @pause-assistant="ai.pauseSpeech"
+        />
       </div>
 
       <div class="global-ai-quick-actions">
         <button v-for="item in ai.quickActions" :key="item" type="button" @click="ai.sendQuickAction(item)">
           {{ item }}
         </button>
+      </div>
+
+      <div class="global-ai-voice-strip">
+        <button
+          type="button"
+          :class="['global-ai-voice-button', { recording: voice.isRecording.value }]"
+          :disabled="!currentSpace || ai.state.isUploadingVoice || (ai.state.isSending && !voice.isRecording.value)"
+          :aria-label="voice.isRecording.value ? '停止语音输入' : '开始语音输入'"
+          @click="voice.toggleRecording"
+        >
+          <Microphone />
+          <span>{{ voiceStatusText }}</span>
+        </button>
+        <small>长按空格</small>
+      </div>
+
+      <div v-if="voice.recordingError.value" class="global-ai-transcription">
+        {{ voice.recordingError.value }}
       </div>
 
       <section v-if="ai.state.pendingConfirmations.length > 0" class="global-ai-confirmation">
@@ -115,14 +140,17 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ChatDotRound, Clock, Delete, FullScreen, Minus, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { ChatDotRound, Clock, Delete, FullScreen, Microphone, Minus, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import AiVoiceMessage from './AiVoiceMessage.vue'
 import { useAiAssistantSession } from '../composables/useAiAssistantSession'
+import { shouldIgnoreVoiceShortcut, useVoiceRecorder } from '../composables/useVoiceRecorder'
 import { useWorkspaceStore } from '../stores/workspace'
 
 const workspace = useWorkspaceStore()
 const ai = useAiAssistantSession()
 const router = useRouter()
+const route = useRoute()
 const currentSpace = computed(() => workspace.currentSpace.value)
 const isExpanded = ref(false)
 const POSITION_STORAGE_KEY = 'qiniu_global_ai_position'
@@ -144,6 +172,23 @@ const assistantStyle = computed(() => ({
   left: `${position.x}px`,
   top: `${position.y}px`,
 }))
+
+const voice = useVoiceRecorder(async (audio) => {
+  await ai.sendVoice(audio)
+})
+
+const voiceStatusText = computed(() => {
+  if (voice.isRecording.value) {
+    return '录音中，松开发送'
+  }
+  if (ai.state.isUploadingVoice) {
+    return '上传中'
+  }
+  if (ai.state.isSending) {
+    return '理解中'
+  }
+  return '语音输入'
+})
 
 async function toggleHistory() {
   ai.state.historyOpen = !ai.state.historyOpen
@@ -261,16 +306,42 @@ function handleResize() {
   savePosition()
 }
 
+function handleVoiceKeyDown(event: KeyboardEvent) {
+  if (route.name === 'ai-chat' || shouldIgnoreVoiceShortcut(event) || event.repeat || !currentSpace.value) {
+    return
+  }
+  event.preventDefault()
+  if (!isExpanded.value) {
+    isExpanded.value = true
+    clampPosition()
+    savePosition()
+  }
+  void voice.startRecording()
+}
+
+function handleVoiceKeyUp(event: KeyboardEvent) {
+  if (route.name === 'ai-chat' || shouldIgnoreVoiceShortcut(event)) {
+    return
+  }
+  event.preventDefault()
+  voice.stopRecording()
+}
+
 onMounted(() => {
   restorePosition()
   void ai.loadConversations()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('keydown', handleVoiceKeyDown)
+  window.addEventListener('keyup', handleVoiceKeyUp)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('keydown', handleVoiceKeyDown)
+  window.removeEventListener('keyup', handleVoiceKeyUp)
   window.removeEventListener('pointermove', handleDragMove)
   window.removeEventListener('pointerup', stopDrag)
   window.removeEventListener('pointercancel', stopDrag)
+  voice.cleanupRecorder()
 })
 </script>

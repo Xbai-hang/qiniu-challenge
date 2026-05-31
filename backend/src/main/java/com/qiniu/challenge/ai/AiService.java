@@ -109,6 +109,11 @@ public class AiService {
 
     @Transactional
     public AiChatResponse chat(long currentUserId, AiChatRequest request) {
+        return chat(currentUserId, request, null);
+    }
+
+    @Transactional
+    public AiChatResponse chat(long currentUserId, AiChatRequest request, Long transcriptionId) {
         permissionService.requireSpaceAccess(request.calendarSpaceId(), currentUserId);
         AiConversation conversation = request.conversationId() == null
                 ? createConversation(currentUserId, new AiConversationRequest(
@@ -122,7 +127,8 @@ public class AiService {
                 "user",
                 defaultString(request.inputMode(), "text"),
                 request.message(),
-                null);
+                null,
+                transcriptionId);
 
         List<ToolExecutionResult> toolResults = new ArrayList<>();
         List<PendingConfirmationResponse> confirmations = new ArrayList<>();
@@ -658,6 +664,17 @@ public class AiService {
             String inputMode,
             String content,
             Object structuredPayload) {
+        return createMessage(currentUserId, conversation, role, inputMode, content, structuredPayload, null);
+    }
+
+    private long createMessage(
+            long currentUserId,
+            AiConversation conversation,
+            String role,
+            String inputMode,
+            String content,
+            Object structuredPayload,
+            Long transcriptionId) {
         return aiRepository.createMessage(new CreateAiMessageCommand(
                 conversation.id(),
                 currentUserId,
@@ -665,7 +682,7 @@ public class AiService {
                 inputMode,
                 content,
                 structuredPayload,
-                null,
+                transcriptionId,
                 aiProperties.getPromptVersion(),
                 aiProperties.getToolSchemaVersion(),
                 aiModelClient.provider(),

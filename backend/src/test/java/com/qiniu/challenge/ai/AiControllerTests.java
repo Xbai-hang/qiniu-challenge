@@ -8,7 +8,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -31,6 +33,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.mock.web.MockMultipartFile;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -350,6 +353,34 @@ class AiControllerTests {
     }
 
     @Test
+    void chatNormalizesAiToolTimesWithoutOffsetToShanghaiTimezone() throws Exception {
+        RegisteredUser user = register("ai_chat_timezone_user", "ai-chat-timezone-user@example.com", "AI Chat Timezone");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "", List.of(new AiRequestedToolCall(
+                        "call_create_event",
+                        "create_event",
+                        Map.of(
+                                "title", "无时区日程",
+                                "startTime", "2026-06-01T10:00:00",
+                                "endTime", "2026-06-01T11:00:00")))))
+                .thenReturn(new AiModelResponse("test-model", "test", "已创建。", List.of()));
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "calendarSpaceId": %d,
+                                  "inputMode": "voice",
+                                  "message": "明天上午十点安排复盘"
+                                }
+                                """.formatted(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resultCard.type").value("event_created"))
+                .andExpect(jsonPath("$.data.resultCard.startTime").value("2026-06-01T10:00+08:00"));
+    }
+
+    @Test
     void confirmationCanExecuteHighRiskDeleteFromChat() throws Exception {
         RegisteredUser user = register("ai_chat_delete_user", "ai-chat-delete-user@example.com", "AI Chat Delete");
         long eventId = createEvent(user, "确认删除目标");
@@ -433,6 +464,103 @@ class AiControllerTests {
         ArgumentCaptor<AiModelRequest> requestCaptor = ArgumentCaptor.forClass(AiModelRequest.class);
         verify(aiModelClient).chat(requestCaptor.capture());
         MatcherAssert.assertThat(requestCaptor.getValue().tools(), Matchers.empty());
+    }
+
+    @Test
+    void speechTranscribeReturnsMockTranscriptAndPersistsMetadata() throws Exception {
+        RegisteredUser user = register("speech_transcribe_user", "speech-transcribe-user@example.com", "Speech User");
+        MockMultipartFile audio = new MockMultipartFile(
+                "file",
+                "voice.webm",
+                "audio/webm",
+                new byte[]{1, 2, 3, 4});
+
+        MvcResult result = mockMvc.perform(multipart("/api/speech/transcribe")
+                        .file(audio)
+                        .header("Authorization", "Bearer " + user.token())
+                        .param("calendarSpaceId", String.valueOf(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.transcriptionId", notNullValue()))
+                .andExpect(jsonPath("$.data.text").value("明天上午十点提醒我做项目复盘"))
+                .andExpect(jsonPath("$.data.provider").value("mock"))
+                .andReturn();
+
+        long transcriptionId = data(result).path("transcriptionId").asLong();
+        Integer persisted = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM speech_transcriptions WHERE id = ? AND user_id = ? AND status = 'succeeded'",
+                Integer.class,
+                transcriptionId,
+                user.id());
+        MatcherAssert.assertThat(persisted, Matchers.is(1));
+    }
+
+    @Test
+    void speechTranscribeRejectsOversizedAudio() throws Exception {
+        RegisteredUser user = register("speech_big_user", "speech-big-user@example.com", "Speech Big");
+        MockMultipartFile audio = new MockMultipartFile(
+                "file",
+                "too-big.webm",
+                "audio/webm",
+                new byte[(10 * 1024 * 1024) + 1]);
+
+        mockMvc.perform(multipart("/api/speech/transcribe")
+                        .file(audio)
+                        .header("Authorization", "Bearer " + user.token())
+                        .param("calendarSpaceId", String.valueOf(user.personalSpaceId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void speechTranscribeAndChatFeedsTranscriptIntoAiAgent() throws Exception {
+        RegisteredUser user = register("speech_chat_user", "speech-chat-user@example.com", "Speech Chat");
+        when(aiModelClient.chat(any()))
+                .thenReturn(new AiModelResponse("test-model", "test", "已收到你的语音日程请求。", List.of()));
+        MockMultipartFile audio = new MockMultipartFile(
+                "file",
+                "voice.webm",
+                "audio/webm",
+                new byte[]{1, 2, 3, 4});
+
+        mockMvc.perform(multipart("/api/speech/transcribe-and-chat")
+                        .file(audio)
+                        .header("Authorization", "Bearer " + user.token())
+                        .param("calendarSpaceId", String.valueOf(user.personalSpaceId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reply").value("已收到你的语音日程请求。"))
+                .andExpect(jsonPath("$.data.transcription.text").value("明天上午十点提醒我做项目复盘"));
+
+        ArgumentCaptor<AiModelRequest> requestCaptor = ArgumentCaptor.forClass(AiModelRequest.class);
+        verify(aiModelClient).chat(requestCaptor.capture());
+        MatcherAssert.assertThat(
+                requestCaptor.getValue().messages().stream().anyMatch(message ->
+                        "user".equals(message.role()) && message.content().contains("明天上午十点提醒我做项目复盘")),
+                Matchers.is(true));
+    }
+
+    @Test
+    void ttsSynthesizeReturnsPlayableTemporaryAudio() throws Exception {
+        RegisteredUser user = register("tts_user", "tts-user@example.com", "TTS User");
+
+        MvcResult result = mockMvc.perform(post("/api/tts/synthesize")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "text": "已为你创建项目复盘。",
+                                  "voice": "alloy"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ttsId", notNullValue()))
+                .andExpect(jsonPath("$.data.audioUrl", Matchers.startsWith("/api/tts/audio/")))
+                .andReturn();
+        long ttsId = data(result).path("ttsId").asLong();
+
+        mockMvc.perform(get("/api/tts/audio/{ttsId}", ttsId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", Matchers.startsWith("audio/wav")));
     }
 
     private long createEvent(RegisteredUser user, String title) throws Exception {
