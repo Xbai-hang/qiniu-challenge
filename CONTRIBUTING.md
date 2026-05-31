@@ -25,3 +25,14 @@ Issue → Branch → Commit → Pull Request → Review → Squash Merge
 - fix/api-timeout
 - docs/update-readme
 - chore/github-templates
+
+## Git 换行符配置建议
+
+为确保仓库中的文本文件统一使用 LF 换行符，请配置本地 Git：
+
+```bash
+git config --global core.autocrlf false
+git config --global core.safecrlf warn
+```
+
+项目已通过 `.gitattributes` 统一管理行尾，请勿在 IDE 中强制改为 CRLF。
