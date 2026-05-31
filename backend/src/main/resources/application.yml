@@ -10,6 +10,10 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:12MB}
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     locations: classpath:db/migration
@@ -32,3 +36,22 @@ app:
     temperature: ${AI_TEMPERATURE:0.2}
     prompt-version: ${AI_PROMPT_VERSION:prompt-v1}
     tool-schema-version: ${AI_TOOL_SCHEMA_VERSION:tool-schema-v1}
+  speech:
+    provider: ${SPEECH_PROVIDER:mock}
+    base-url: ${SPEECH_BASE_URL:}
+    chat-completions-url: ${SPEECH_CHAT_COMPLETIONS_URL:}
+    transcriptions-url: ${SPEECH_TRANSCRIPTIONS_URL:}
+    api-key: ${SPEECH_API_KEY:}
+    model: ${SPEECH_MODEL:whisper-1}
+    timeout-seconds: ${SPEECH_TIMEOUT_SECONDS:30}
+    max-file-size-bytes: ${SPEECH_MAX_FILE_SIZE_BYTES:10485760}
+  tts:
+    provider: ${TTS_PROVIDER:mock}
+    base-url: ${TTS_BASE_URL:}
+    chat-completions-url: ${TTS_CHAT_COMPLETIONS_URL:}
+    api-key: ${TTS_API_KEY:}
+    model: ${TTS_MODEL:tts-1}
+    voice: ${TTS_VOICE:alloy}
+    timeout-seconds: ${TTS_TIMEOUT_SECONDS:30}
+    cache-ttl-minutes: ${TTS_CACHE_TTL_MINUTES:30}
+    max-text-length: ${TTS_MAX_TEXT_LENGTH:1200}

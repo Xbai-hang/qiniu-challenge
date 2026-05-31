@@ -53,10 +53,16 @@
           <strong>你好，我是你的 AI 日历助手</strong>
           <span>可以直接安排日程、查询日程、处理确认和撤销最近操作。</span>
         </div>
-        <article v-for="message in ai.state.messages" :key="message.id" :class="['ai-chat-message', message.role]">
-          <span>{{ message.role === 'user' ? '你' : 'AI' }}</span>
-          <p>{{ message.content }}</p>
-        </article>
+        <AiVoiceMessage
+          v-for="message in ai.state.messages"
+          :key="message.id"
+          :message="message"
+          :preparing-message-id="ai.state.preparingSpeechMessageId"
+          :speaking-message-id="ai.state.speakingMessageId"
+          @play-user="ai.playUserVoice"
+          @play-assistant="ai.playAssistantMessage"
+          @pause-assistant="ai.pauseSpeech"
+        />
       </div>
 
       <section v-if="ai.state.pendingConfirmations.length > 0" class="ai-chat-confirmation">
@@ -90,6 +96,25 @@
         </button>
       </div>
 
+      <div class="ai-chat-voice-bar">
+        <button
+          type="button"
+          :class="['ai-chat-voice-button', { recording: voice.isRecording.value }]"
+          :disabled="!currentSpace || ai.state.isUploadingVoice || (ai.state.isSending && !voice.isRecording.value)"
+          :aria-label="voice.isRecording.value ? '停止语音输入' : '开始语音输入'"
+          @click="voice.toggleRecording"
+        >
+          <Microphone />
+          <span>{{ voiceStatusText }}</span>
+        </button>
+        <span class="ai-chat-voice-hint">长按空格开始录音，松开发送</span>
+      </div>
+
+      <div v-if="voice.recordingError.value" class="ai-chat-transcription">
+        <span>录音失败</span>
+        <p>{{ voice.recordingError.value }}</p>
+      </div>
+
       <form class="ai-chat-input" @submit.prevent="ai.sendDraft">
         <input
           v-model.trim="ai.draft.value"
@@ -107,14 +132,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { Delete, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { Delete, Microphone, Plus, Promotion, RefreshLeft } from '@element-plus/icons-vue'
+import AiVoiceMessage from '../components/AiVoiceMessage.vue'
 import { useAiAssistantSession } from '../composables/useAiAssistantSession'
+import { shouldIgnoreVoiceShortcut, useVoiceRecorder } from '../composables/useVoiceRecorder'
 import { useWorkspaceStore } from '../stores/workspace'
 
 const ai = useAiAssistantSession()
 const workspace = useWorkspaceStore()
 const currentSpace = computed(() => workspace.currentSpace.value)
+const voice = useVoiceRecorder(async (audio) => {
+  await ai.sendVoice(audio)
+})
+
+const voiceStatusText = computed(() => {
+  if (voice.isRecording.value) {
+    return '录音中，松开发送'
+  }
+  if (ai.state.isUploadingVoice) {
+    return '上传中'
+  }
+  if (ai.state.isSending) {
+    return '理解中'
+  }
+  return '语音输入'
+})
 
 function formatConversationTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -125,7 +168,31 @@ function formatConversationTime(value: string) {
   }).format(new Date(value))
 }
 
+function handleVoiceKeyDown(event: KeyboardEvent) {
+  if (shouldIgnoreVoiceShortcut(event) || event.repeat || !currentSpace.value) {
+    return
+  }
+  event.preventDefault()
+  void voice.startRecording()
+}
+
+function handleVoiceKeyUp(event: KeyboardEvent) {
+  if (shouldIgnoreVoiceShortcut(event)) {
+    return
+  }
+  event.preventDefault()
+  voice.stopRecording()
+}
+
 onMounted(() => {
   void ai.loadConversations()
+  window.addEventListener('keydown', handleVoiceKeyDown)
+  window.addEventListener('keyup', handleVoiceKeyUp)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleVoiceKeyDown)
+  window.removeEventListener('keyup', handleVoiceKeyUp)
+  voice.cleanupRecorder()
 })
 </script>

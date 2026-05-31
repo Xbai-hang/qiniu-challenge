@@ -51,7 +51,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(buildUrl(path, options.params), {
+    const response = await fetch(buildApiUrl(path, options.params), {
       method: options.method ?? 'GET',
       headers: buildHeaders(options.body, options.headers),
       body: serializeBody(options.body),
@@ -88,7 +88,7 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, '')
 }
 
-function buildUrl(path: string, params?: RequestOptions['params']) {
+export function buildApiUrl(path: string, params?: RequestOptions['params']) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   const url = new URL(`${clientConfig.baseUrl}${normalizedPath}`, window.location.origin)
 
