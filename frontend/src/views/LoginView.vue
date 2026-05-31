@@ -18,8 +18,8 @@
       <RouterLink class="auth-brand" to="/">
         <span class="brand-mark" aria-hidden="true">AI</span>
         <span>
-          <strong>语音日历</strong>
-          <small>AI Native Productivity OS</small>
+          <strong>语历</strong>
+          <small>Vocalendar</small>
         </span>
       </RouterLink>
 

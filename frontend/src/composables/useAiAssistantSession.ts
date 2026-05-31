@@ -8,18 +8,26 @@ import {
   getPendingConfirmations,
   rejectPendingAction,
   sendAiChat,
+  fetchTtsAudio,
+  synthesizeTts,
+  transcribeAndChatAudio,
   undoLastAiOperation,
   type AiConversation,
   type AiMessage,
   type AiToolCall,
   type PendingConfirmation,
+  type SpeechTranscription,
 } from '../api'
 import { useWorkspaceStore } from '../stores/workspace'
 
 export type AssistantChatMessage = {
   id: number
+  backendMessageId?: number
   role: 'user' | 'assistant'
   content: string
+  inputMode?: 'text' | 'voice' | string | null
+  audioUrl?: string
+  transcriptText?: string
 }
 
 type AiAssistantState = {
@@ -28,8 +36,16 @@ type AiAssistantState = {
   conversations: AiConversation[]
   pendingConfirmations: PendingConfirmation[]
   lastToolCalls: AiToolCall[]
+  lastTranscription?: SpeechTranscription
+  lastAssistantMessageId?: number
+  audioUrl?: string
+  preparingSpeechMessageId?: number
+  speakingMessageId?: number
   canUndo: boolean
   isSending: boolean
+  isUploadingVoice: boolean
+  isPreparingSpeech: boolean
+  isSpeaking: boolean
   isConfirming: boolean
   isUndoing: boolean
   isLoadingHistory: boolean
@@ -42,8 +58,16 @@ const state = reactive<AiAssistantState>({
   conversations: [],
   pendingConfirmations: [],
   lastToolCalls: [],
+  lastTranscription: undefined,
+  lastAssistantMessageId: undefined,
+  audioUrl: undefined,
+  preparingSpeechMessageId: undefined,
+  speakingMessageId: undefined,
   canUndo: false,
   isSending: false,
+  isUploadingVoice: false,
+  isPreparingSpeech: false,
+  isSpeaking: false,
   isConfirming: false,
   isUndoing: false,
   isLoadingHistory: false,
@@ -51,6 +75,9 @@ const state = reactive<AiAssistantState>({
 })
 
 const draft = ref('')
+const speechAudio = ref<HTMLAudioElement | null>(null)
+const userAudio = ref<HTMLAudioElement | null>(null)
+const generatedVoiceUrls = new Set<string>()
 let messageSeq = 1
 
 export function useAiAssistantSession() {
@@ -75,11 +102,7 @@ export function useAiAssistantSession() {
         },
         { showErrorMessage: false },
       )
-      state.conversationId = response.conversationId
-      state.messages.push({ id: messageSeq++, role: 'assistant', content: response.reply })
-      state.pendingConfirmations = response.confirmations ?? []
-      state.lastToolCalls = response.toolCalls ?? []
-      state.canUndo = Boolean(response.resultCard?.actions?.includes('undo'))
+      applyAiResponse(response)
       refreshCalendarIfNeeded()
       void loadConversations()
     } catch (error) {
@@ -96,6 +119,54 @@ export function useAiAssistantSession() {
     const content = draft.value
     draft.value = ''
     await sendMessage(content)
+  }
+
+  async function sendVoice(audio: Blob) {
+    if (!currentSpace.value || state.isSending || state.isUploadingVoice) {
+      return
+    }
+
+    state.isUploadingVoice = true
+    state.isSending = true
+    state.lastTranscription = undefined
+    const audioUrl = URL.createObjectURL(audio)
+    generatedVoiceUrls.add(audioUrl)
+    try {
+      const response = await transcribeAndChatAudio(
+        {
+          file: audio,
+          calendarSpaceId: currentSpace.value.id,
+          conversationId: state.conversationId,
+        },
+        { showErrorMessage: false },
+      )
+      state.lastTranscription = response.transcription
+      state.messages.push({
+        id: messageSeq++,
+        role: 'user',
+        content: response.transcription.text,
+        inputMode: 'voice',
+        audioUrl,
+        transcriptText: response.transcription.text,
+      })
+      applyAiResponse(response)
+      refreshCalendarIfNeeded()
+      void loadConversations()
+
+      if (currentSpace.value.type === 'personal') {
+        void playLatestReply()
+      }
+    } catch (error) {
+      URL.revokeObjectURL(audioUrl)
+      generatedVoiceUrls.delete(audioUrl)
+      state.lastToolCalls = []
+      state.pendingConfirmations = []
+      state.canUndo = false
+      ElMessage.error(error instanceof Error ? error.message : '语音识别失败，可改用键盘输入')
+    } finally {
+      state.isUploadingVoice = false
+      state.isSending = false
+    }
   }
 
   async function sendQuickAction(action: string) {
@@ -130,6 +201,11 @@ export function useAiAssistantSession() {
     state.lastToolCalls = []
     state.pendingConfirmations = []
     state.canUndo = false
+    state.lastTranscription = undefined
+    state.preparingSpeechMessageId = undefined
+    state.speakingMessageId = undefined
+    stopUserVoice()
+    stopSpeech()
     try {
       const messages = await getAiConversationMessages(conversationId, { showErrorMessage: false })
       state.messages = messages
@@ -158,8 +234,15 @@ export function useAiAssistantSession() {
     state.messages = []
     state.pendingConfirmations = []
     state.lastToolCalls = []
+    state.lastTranscription = undefined
+    state.lastAssistantMessageId = undefined
+    state.preparingSpeechMessageId = undefined
+    state.speakingMessageId = undefined
     state.canUndo = false
     draft.value = ''
+    revokeVoiceMessageUrls()
+    stopUserVoice()
+    stopSpeech()
   }
 
   async function confirmConfirmation(confirmationId: number) {
@@ -208,6 +291,96 @@ export function useAiAssistantSession() {
     }
   }
 
+  async function playLatestReply() {
+    const assistantMessage = [...state.messages].reverse().find((message) => message.role === 'assistant')
+    if (!assistantMessage) {
+      return
+    }
+    await playAssistantMessage(assistantMessage)
+  }
+
+  async function playAssistantMessage(message: AssistantChatMessage) {
+    if (message.role !== 'assistant' || state.isPreparingSpeech) {
+      return
+    }
+
+    state.isPreparingSpeech = true
+    state.preparingSpeechMessageId = message.id
+    try {
+      stopSpeech()
+      const tts = await synthesizeTts(
+        {
+          messageId: message.backendMessageId ?? state.lastAssistantMessageId,
+          text: message.content,
+        },
+        { showErrorMessage: false },
+      )
+      const audioBlob = await fetchTtsAudio(tts.audioUrl)
+      const audioUrl = URL.createObjectURL(audioBlob)
+      const audio = new Audio(audioUrl)
+      speechAudio.value = audio
+      state.audioUrl = audioUrl
+      state.isSpeaking = true
+      state.speakingMessageId = message.id
+      audio.onended = () => {
+        state.isSpeaking = false
+        state.speakingMessageId = undefined
+      }
+      audio.onpause = () => {
+        state.isSpeaking = false
+        state.speakingMessageId = undefined
+      }
+      await audio.play()
+    } catch (error) {
+      stopSpeech()
+      ElMessage.warning(error instanceof Error ? error.message : '语音播报暂不可用')
+    } finally {
+      state.isPreparingSpeech = false
+      state.preparingSpeechMessageId = undefined
+    }
+  }
+
+  async function playUserVoice(message: AssistantChatMessage) {
+    if (!message.audioUrl) {
+      return
+    }
+    stopUserVoice()
+    const audio = new Audio(message.audioUrl)
+    userAudio.value = audio
+    await audio.play()
+  }
+
+  function pauseSpeech() {
+    speechAudio.value?.pause()
+    state.isSpeaking = false
+    state.speakingMessageId = undefined
+  }
+
+  function stopSpeech() {
+    if (speechAudio.value) {
+      speechAudio.value.pause()
+      speechAudio.value = null
+    }
+    if (state.audioUrl) {
+      URL.revokeObjectURL(state.audioUrl)
+      state.audioUrl = undefined
+    }
+    state.isSpeaking = false
+    state.speakingMessageId = undefined
+  }
+
+  function stopUserVoice() {
+    if (userAudio.value) {
+      userAudio.value.pause()
+      userAudio.value = null
+    }
+  }
+
+  function revokeVoiceMessageUrls() {
+    generatedVoiceUrls.forEach((url) => URL.revokeObjectURL(url))
+    generatedVoiceUrls.clear()
+  }
+
   return {
     currentSpace,
     draft,
@@ -215,6 +388,7 @@ export function useAiAssistantSession() {
     quickActions: ['创建日程', '查询日程', '检查冲突', '推荐时间'],
     sendDraft,
     sendMessage,
+    sendVoice,
     sendQuickAction,
     loadConversations,
     selectConversation,
@@ -223,7 +397,35 @@ export function useAiAssistantSession() {
     confirmConfirmation,
     rejectConfirmation,
     undoLast,
+    playLatestReply,
+    playAssistantMessage,
+    playUserVoice,
+    pauseSpeech,
+    stopSpeech,
+    stopUserVoice,
   }
+}
+
+function applyAiResponse(response: {
+  conversationId: number
+  messageId: number
+  reply: string
+  confirmations?: PendingConfirmation[]
+  toolCalls?: AiToolCall[]
+  resultCard?: { actions?: string[] } | null
+}) {
+  state.conversationId = response.conversationId
+  state.lastAssistantMessageId = response.messageId
+  state.messages.push({
+    id: messageSeq++,
+    backendMessageId: response.messageId,
+    role: 'assistant',
+    content: response.reply,
+    inputMode: 'text',
+  })
+  state.pendingConfirmations = response.confirmations ?? []
+  state.lastToolCalls = response.toolCalls ?? []
+  state.canUndo = Boolean(response.resultCard?.actions?.includes('undo'))
 }
 
 function isVisibleMessage(message: AiMessage) {
@@ -233,8 +435,11 @@ function isVisibleMessage(message: AiMessage) {
 function toChatMessage(message: AiMessage): AssistantChatMessage {
   return {
     id: message.id,
+    backendMessageId: message.id,
     role: message.role === 'user' ? 'user' : 'assistant',
     content: message.content,
+    inputMode: message.inputMode,
+    transcriptText: message.inputMode === 'voice' ? message.content : undefined,
   }
 }
 
