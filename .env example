@@ -1,0 +1,37 @@
+DB_URL=jdbc:mysql://localhost:3306/qiniu_challenge?useUnicode=true&characterEncoding=UTF8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+DB_USERNAME=root
+DB_PASSWORD=password
+FLYWAY_ENABLED=true
+SERVER_PORT=8080
+JWT_SECRET=qiniu-challenge-dev-secret-change-me
+ACCESS_TOKEN_TTL_SECONDS=86400
+
+AI_PROVIDER=openai-compatible
+AI_BASE_URL=your endpoint
+AI_API_KEY=your key
+AI_MODEL=your model
+
+# Speech ASR / STT
+#填入支持语音输入的模型.
+SPEECH_PROVIDER=openai-chat-completions
+SPEECH_BASE_URL=your endpoint
+SPEECH_CHAT_COMPLETIONS_URL=your endpoint/v1/chat/completions
+SPEECH_TRANSCRIPTIONS_URL=
+SPEECH_API_KEY=your key
+SPEECH_MODEL=your model
+SPEECH_TIMEOUT_SECONDS=30
+SPEECH_MAX_FILE_SIZE_BYTES=10485760
+MULTIPART_MAX_FILE_SIZE=10MB
+MULTIPART_MAX_REQUEST_SIZE=12MB
+
+# Text to Speech
+# 填入支持文字转语音的模型
+TTS_PROVIDER=openai-chat-completions
+TTS_BASE_URL=your endpoint
+TTS_CHAT_COMPLETIONS_URL=your endpoint/v1/chat/completions
+TTS_API_KEY=your key
+TTS_MODEL=mimo-v2.5-tts
+TTS_VOICE=茉莉
+TTS_TIMEOUT_SECONDS=30
+TTS_CACHE_TTL_MINUTES=30
+TTS_MAX_TEXT_LENGTH=1200
